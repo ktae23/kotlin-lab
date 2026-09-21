@@ -120,6 +120,24 @@
   }
   .assist-box code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 
+  /* ---------- 하단 내비 ---------- */
+  .navbar {
+    flex: none; display: flex; align-items: center; gap: 8px;
+    border-top: 1px solid var(--line); background: var(--panel); padding: 8px 12px;
+  }
+  .navbar button {
+    background: none; border: 1px solid var(--line); border-radius: 6px; color: var(--muted);
+    font: inherit; font-size: 12.5px; padding: 6px 13px; cursor: pointer;
+  }
+  .navbar button:hover:not(:disabled) { border-color: var(--accent); color: var(--fg); }
+  .navbar button:disabled { opacity: .35; cursor: default; }
+  .navbar button.primary:not(:disabled) {
+    background: var(--accent); color: #10131a; border-color: var(--accent); font-weight: 600;
+  }
+  .navbar .status { flex: 1; font-size: 12px; color: var(--muted); }
+  .navbar .status.done { color: #56b98a; }
+  .lesson-list .check { color: #56b98a; margin-right: 4px; font-size: 11px; }
+
   .prompt-box { padding: 12px 18px; border-bottom: 1px solid var(--line); background: var(--panel-2); font-size: 13px; color: #c7cdd8; }
   .prompt-box:empty { display: none; }
   .prompt-box code { font: 12px var(--mono); background: var(--bg); padding: 1px 5px; border-radius: 4px; color: #ffd9a0; }
@@ -179,6 +197,12 @@
   <div class="assist-box" id="assist" hidden></div>
   <div class="editor-wrap"><textarea id="code"></textarea></div>
   <div class="output" id="output"><span class="empty">실행 결과가 여기 표시됩니다.</span></div>
+  <div class="navbar">
+    <button id="prevBtn">← 이전</button>
+    <span class="status" id="navStatus"></span>
+    <button id="saveBtn">진도 저장</button>
+    <button id="nextBtn" class="primary">다음 →</button>
+  </div>
 </section>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
@@ -206,12 +230,31 @@ async function loadLessons() {
   $("lessonList").innerHTML = "";
   lessons.forEach((l) => {
     const b = document.createElement("button");
-    b.innerHTML = `<span class="num">${l.id.slice(0, 2)}</span>${l.title.replace(/^Lesson\s*\d+\s*—\s*/, "")}`;
-    b.onclick = () => openLesson(l.id);
     b.dataset.id = l.id;
+    b.onclick = () => openLesson(l.id);
     $("lessonList").appendChild(b);
   });
-  if (lessons.length) openLesson(location.hash.slice(1) || lessons[0].id);
+  await loadProgress();
+  renderList();
+  if (lessons.length) openLesson(location.hash.slice(1) || nextUnfinished());
+}
+
+// 사이드바는 진도(✓)를 함께 보여준다
+function renderList() {
+  lessons.forEach((l) => {
+    const b = $("lessonList").querySelector(`[data-id="${l.id}"]`);
+    if (!b) return;
+    const done = completed.includes(l.id.slice(0, 2));
+    b.innerHTML =
+      `<span class="num">${l.id.slice(0, 2)}</span>` +
+      (done ? `<span class="check">✓</span>` : "") +
+      l.title.replace(/^Lesson\s*\d+\s*—\s*/, "");
+  });
+}
+
+// 이어서 할 레슨 = 아직 체크 안 된 첫 레슨
+function nextUnfinished() {
+  return (lessons.find((l) => !completed.includes(l.id.slice(0, 2))) ?? lessons[0]).id;
 }
 
 async function openLesson(id) {
@@ -232,7 +275,55 @@ async function openLesson(id) {
   cm.setValue(current.saved ?? current.exercise?.starter ?? "fun main() {\n    \n}\n");
   $("output").innerHTML = '<span class="empty">실행 결과가 여기 표시됩니다.</span>';
   resetAssist();
+  renderNav();
 }
+
+// ------------------------------------------------------------------ 진도 / 내비
+let completed = [];
+
+async function loadProgress() {
+  try {
+    completed = (await (await fetch("/api/progress")).json()).completed ?? [];
+  } catch { completed = []; }
+}
+
+const idx = () => lessons.findIndex((l) => l.id === current?.id);
+const isDone = () => !!current && completed.includes(current.id.slice(0, 2));
+
+function renderNav() {
+  const i = idx();
+  $("prevBtn").disabled = i <= 0;
+  // 다음은 마지막 레슨이 아니고, 통과했거나 이미 완료한 레슨일 때만 열린다
+  $("nextBtn").disabled = i < 0 || i >= lessons.length - 1 || !isDone();
+  $("saveBtn").disabled = !current?.exercise;
+  $("saveBtn").textContent = isDone() ? "진도 해제" : "진도 저장";
+  const s = $("navStatus");
+  s.classList.toggle("done", isDone());
+  s.textContent = !current
+    ? ""
+    : isDone()
+      ? `완료 · ${completed.length}/${lessons.length}`
+      : `미완료 · ${completed.length}/${lessons.length} — 통과하면 자동 저장됩니다`;
+}
+
+async function setProgress(done) {
+  if (!current) return;
+  try {
+    const r = await fetch("/api/progress", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ lessonId: current.id, done }),
+    });
+    const d = await r.json();
+    if (d.completed) completed = d.completed;
+  } catch { /* 진도 저장 실패해도 학습은 계속 */ }
+  renderList();
+  renderNav();
+}
+
+$("prevBtn").onclick = () => { const i = idx(); if (i > 0) openLesson(lessons[i - 1].id); };
+$("nextBtn").onclick = () => { const i = idx(); if (i < lessons.length - 1) openLesson(lessons[i + 1].id); };
+$("saveBtn").onclick = () => setProgress(!isDone());
 
 // -------------------------------------------------------------- 힌트 / 정답
 // 힌트는 한 번에 하나씩, 정답은 두 번 눌러야 열린다 (실수로 보는 걸 막는다)
@@ -354,6 +445,9 @@ function render(r, fileLabel) {
       <div><div class="out-label" style="margin-top:0">기대</div>${esc(r.expected)}</div></div>`;
   }
   $("output").innerHTML = html;
+
+  // 통과하면 진도표에 바로 기록한다 (이미 완료면 재기록하지 않는다)
+  if (r.passed === true && !isDone()) setProgress(true);
 }
 
 // ------------------------------------------------------------------ 모드 전환

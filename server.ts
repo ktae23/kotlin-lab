@@ -90,6 +90,42 @@ function parseLesson(file: string): Lesson {
   };
 }
 
+// ------------------------------------------------------------------ 진도
+// curriculum/progress.md 의 레슨 체크리스트 행을 읽고 쓴다.
+//   | [ ] | 01 | null 안정성 | W1 |  |  |  |
+const PROGRESS_FILE = path.join(__dirname, "curriculum", "progress.md");
+const progressRow = (num: string) =>
+  new RegExp(`^\\|\\s*\\[([ xX])\\]\\s*\\|\\s*${num}\\s*\\|(.*)$`, "m");
+
+function readProgress(): string[] {
+  if (!fs.existsSync(PROGRESS_FILE)) return [];
+  const done: string[] = [];
+  for (const line of fs.readFileSync(PROGRESS_FILE, "utf-8").split("\n")) {
+    const m = line.match(/^\|\s*\[([ xX])\]\s*\|\s*(\d{2})\s*\|/);
+    if (m && m[1].toLowerCase() === "x") done.push(m[2]);
+  }
+  return done;
+}
+
+function writeProgress(num: string, done: boolean) {
+  if (!fs.existsSync(PROGRESS_FILE)) throw new Error("progress.md 가 없습니다");
+  const raw = fs.readFileSync(PROGRESS_FILE, "utf-8");
+  const re = progressRow(num);
+  if (!re.test(raw)) throw new Error(`진도표에 ${num} 행이 없습니다`);
+
+  const today = new Date().toLocaleDateString("sv-SE"); // YYYY-MM-DD (로컬 기준)
+  const next = raw.replace(re, (_full, _mark, rest: string) => {
+    // rest = "제목 | 주차 | 수강일 | 연습 통과 | 메모 |"
+    const cells = rest.split("|");
+    if (cells.length >= 5) {
+      cells[2] = done ? ` ${today} ` : "  "; // 수강일
+      cells[3] = done ? " ✓ " : "  ";        // 연습 통과
+    }
+    return `| [${done ? "x" : " "}] | ${num} |${cells.join("|")}`;
+  });
+  fs.writeFileSync(PROGRESS_FILE, next, "utf-8");
+}
+
 function loadLessons(): Lesson[] {
   if (!fs.existsSync(LESSONS_DIR)) return [];
   return fs
@@ -325,6 +361,24 @@ const server = http.createServer(async (req, res) => {
       expected,
       passed: expected !== null && result.ok && normalize(result.stdout) === normalize(expected),
     });
+  }
+
+  // 진도: curriculum/progress.md 의 레슨 체크리스트를 읽고 쓴다
+  if (route === "/api/progress" && req.method === "GET") {
+    return json(res, 200, { completed: readProgress() });
+  }
+
+  if (route === "/api/progress" && req.method === "POST") {
+    const body = await readBody(req);
+    const lessonId = String(body.lessonId ?? "");
+    const done = body.done !== false;
+    if (!/^\d{2}-/.test(lessonId)) return json(res, 400, { error: "레슨 id 형식이 올바르지 않습니다" });
+    try {
+      writeProgress(lessonId.slice(0, 2), done);
+      return json(res, 200, { completed: readProgress() });
+    } catch (err) {
+      return json(res, 500, { error: `진도 기록 실패: ${err}` });
+    }
   }
 
   if (route === "/api/watch" && req.method === "POST") {
