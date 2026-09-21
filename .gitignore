@@ -1,0 +1,17 @@
+# 실행 산출물
+.run/
+workspace/
+out/
+
+# 내려받은 의존성 (scripts/fetch-deps.sh 로 복원)
+lib/*.jar
+
+# Node
+node_modules/
+npm-debug.log*
+
+# OS / 에디터
+.DS_Store
+.idea/
+.vscode/
+*.swp

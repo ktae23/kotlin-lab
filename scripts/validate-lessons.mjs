@@ -1,0 +1,50 @@
+// 레슨 파일이 server.ts 의 파서 규칙을 만족하는지 검사한다.
+// 사용: node scripts/validate-lessons.mjs
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "lessons");
+const files = fs.readdirSync(DIR).filter((f) => f.endsWith(".md")).sort();
+
+let bad = 0;
+for (const f of files) {
+  const raw = fs.readFileSync(path.join(DIR, f), "utf-8");
+  const errs = [];
+
+  // server.ts 와 동일한 정규식
+  const title = raw.match(/^#\s+(.+)$/m);
+  const starterAll = raw.match(/```kotlin starter\n([\s\S]*?)```/g) ?? [];
+  const expectedAll = raw.match(/```text expected\n([\s\S]*?)```/g) ?? [];
+  const hasSection = /^##\s*연습\s*$/m.test(raw);
+  const prompt = raw.match(/##\s*연습\s*\n([\s\S]*?)(?=```kotlin starter)/);
+
+  if (!title) errs.push("`# 제목` 없음");
+  else if (!/^Lesson \d+ —/.test(title[1].trim())) errs.push(`제목 형식: "${title[1].trim()}"`);
+  if (!hasSection) errs.push("`## 연습` 섹션 없음 (단독 줄이어야 함)");
+  if (starterAll.length !== 1) errs.push(`kotlin starter 펜스 ${starterAll.length}개 (1개여야 함)`);
+  if (expectedAll.length !== 1) errs.push(`text expected 펜스 ${expectedAll.length}개 (1개여야 함)`);
+  if (hasSection && starterAll.length === 1 && !prompt) errs.push("연습 설명이 비어 있음");
+
+  const starter = raw.match(/```kotlin starter\n([\s\S]*?)```/);
+  if (starter && !/fun\s+main\s*\(/.test(starter[1])) errs.push("starter 에 `fun main()` 없음");
+
+  // 학습 서버 클래스패스에 없는 라이브러리 import 금지
+  if (starter) {
+    const banned = starter[1].match(/^\s*import\s+(?!kotlin[x]?\.)([\w.]+)/gm);
+    if (banned) errs.push(`허용되지 않은 import: ${banned.map((s) => s.trim()).join(", ")}`);
+  }
+
+  const theoryLines = raw.split(/^##\s*연습\s*$/m)[0].trim().split("\n").length;
+
+  if (errs.length) {
+    bad++;
+    console.log(`✗ ${f}`);
+    for (const e of errs) console.log(`    - ${e}`);
+  } else {
+    console.log(`✓ ${f}  (이론 ${theoryLines}줄)`);
+  }
+}
+
+console.log(`\n${files.length}개 중 ${files.length - bad}개 통과, ${bad}개 실패`);
+process.exit(bad ? 1 : 0);

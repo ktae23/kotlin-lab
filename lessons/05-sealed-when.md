@@ -1,0 +1,113 @@
+# Lesson 5 — sealed class 와 when
+
+Java에서 상태나 결과를 표현할 때 쓰던 enum + switch, 또는 추상 클래스 + instanceof 분기가 **컴파일 타임 완전성 검증**으로 바뀝니다.
+
+## 문제: Java에서 "결과"를 표현하기
+
+```java
+// enum은 데이터를 못 담는다
+enum Result { SUCCESS, FAILURE, LOADING }
+
+// 상속은 담을 수 있지만, 분기에서 컴파일러가 도와주지 않는다
+if (r instanceof Success) { ... }
+else if (r instanceof Failure) { ... }
+// Loading 처리를 빠뜨려도 컴파일은 통과한다 → 런타임 버그
+```
+
+## sealed — 상속 계층을 봉인한다
+
+```kotlin
+sealed interface ApiResult {
+    data class Success(val data: String) : ApiResult
+    data class Failure(val code: Int, val message: String) : ApiResult
+    data object Loading : ApiResult
+}
+```
+
+`sealed`는 **하위 타입이 같은 모듈 안에만 존재할 수 있다**는 선언입니다. 컴파일러가 **하위 타입 전체 목록을 안다**는 게 핵심이에요.
+
+- `enum`: 값은 고정, **데이터를 못 담음**
+- `sealed`: 하위 타입 고정, **각자 다른 데이터를 담음**
+- 일반 상속: 하위 타입 무제한, 컴파일러가 모름
+
+## when 이 완전성을 강제한다
+
+```kotlin
+fun describe(result: ApiResult): String = when (result) {
+    is ApiResult.Success -> "성공: ${result.data}"
+    is ApiResult.Failure -> "실패(${result.code}): ${result.message}"
+    ApiResult.Loading    -> "로딩 중"
+}
+```
+
+두 가지가 동시에 일어납니다.
+
+1. **`else` 절이 필요 없습니다.** 컴파일러가 세 가지가 전부임을 압니다.
+2. **분기 안에서 스마트 캐스트됩니다.** `result.data`를 캐스팅 없이 바로 씁니다.
+
+**진짜 가치는 여기입니다** — 나중에 `Timeout` 하위 타입을 추가하면, 그 타입을 처리하지 않은 **모든 `when`이 컴파일 에러**가 납니다. 런타임에 발견될 버그가 컴파일 시점으로 당겨져요.
+
+> 그래서 sealed class를 다루는 `when`에는 **`else`를 붙이지 마세요.** `else`를 붙이는 순간 이 안전망이 사라집니다.
+
+## when 의 다른 얼굴들
+
+```kotlin
+// 인자 없는 when — if/else if 체인 대체
+val grade = when {
+    score >= 90 -> "A"
+    score >= 80 -> "B"
+    else -> "F"
+}
+
+// 여러 값, 범위, 타입
+when (x) {
+    0, 1 -> "작음"
+    in 2..9 -> "한 자리"
+    is String -> "문자열"
+    else -> "기타"
+}
+
+// 검사 대상을 변수로 묶기
+when (val r = fetch()) {
+    is Success -> r.data
+    else -> ""
+}
+```
+
+## data object
+
+`Loading`처럼 데이터가 없는 하위 타입은 `data object`로 선언합니다. 싱글턴이고, `toString()`이 `Loading`으로 예쁘게 나옵니다.
+
+## 실무에서 어디에 쓰나
+
+- **API 응답 결과** — Success / Failure / Loading
+- **도메인 상태 전이** — 주문 상태를 상태별 데이터와 함께 (`Paid(paidAt)`, `Canceled(reason)`)
+- **예외 대신 반환값으로 실패 표현** — 검사 예외 없는 Kotlin에서 특히 유용
+
+## 연습
+
+`sealed interface ApiResult`와 세 하위 타입을 정의하고, `describe`를 `when` 표현식으로 완성하세요.
+
+- `Success(data: String)`
+- `Failure(code: Int, message: String)`
+- `Loading` — 데이터 없음
+
+**조건: `when`에 `else` 절을 쓰지 마세요.** 안 써도 컴파일되면 성공입니다.
+
+```kotlin starter
+// TODO: sealed interface ApiResult 와 세 하위 타입을 정의하세요.
+
+fun describe(result: ApiResult): String = TODO("when 으로 완성하세요")
+
+fun main() {
+    println(describe(ApiResult.Success("주문 12건")))
+    println(describe(ApiResult.Failure(503, "서비스 불가")))
+    println(describe(ApiResult.Loading))
+}
+```
+
+```text expected
+성공: 주문 12건
+실패(503): 서비스 불가
+로딩 중
+```
