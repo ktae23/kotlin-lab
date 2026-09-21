@@ -115,11 +115,15 @@ function writeProgress(num: string, done: boolean) {
 
   const today = new Date().toLocaleDateString("sv-SE"); // YYYY-MM-DD (로컬 기준)
   const next = raw.replace(re, (_full, _mark, rest: string) => {
-    // rest = "제목 | 주차 | 수강일 | 연습 통과 | 메모 |"
+    // rest = "제목 | Part | 주차 | 수강일 | 연습 통과 | 메모 |"
+    // 끝의 빈 조각을 뺀 뒤, 뒤에서부터 세어 열 위치를 잡는다 (열이 늘어도 안 깨지게)
     const cells = rest.split("|");
-    if (cells.length >= 5) {
-      cells[2] = done ? ` ${today} ` : "  "; // 수강일
-      cells[3] = done ? " ✓ " : "  ";        // 연습 통과
+    const last = cells.length - 1; // 마지막은 행 끝 빈 문자열
+    const memo = last - 1, passed = last - 2, taken = last - 3;
+    if (taken > 0) {
+      cells[taken] = done ? ` ${today} ` : "  ";
+      cells[passed] = done ? " ✓ " : "  ";
+      void memo; // 메모는 사용자가 쓰는 칸이라 건드리지 않는다
     }
     return `| [${done ? "x" : " "}] | ${num} |${cells.join("|")}`;
   });

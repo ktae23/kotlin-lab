@@ -1,5 +1,7 @@
 // 모든 레슨의 정답 블록을 실제로 컴파일·실행해서 expected 와 대조한다.
-// 사용: node scripts/verify-solutions.mjs
+// 사용: node scripts/verify-solutions.mjs            전체
+//       node scripts/verify-solutions.mjs 05 06 07   번호만
+//       node scripts/verify-solutions.mjs 05-10      범위
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -13,10 +15,22 @@ const LIB = fs.existsSync(path.join(ROOT, "lib"))
       .map((f) => path.join(ROOT, "lib", f)).join(path.delimiter)
   : "";
 const work = fs.mkdtempSync(path.join(os.tmpdir(), "verify-sol-"));
+
+// 인자로 레슨 번호를 주면 그것만 검증한다 (집필 중 부분 확인용)
+const wanted = new Set();
+for (const a of process.argv.slice(2)) {
+  const range = a.match(/^(\d{1,2})-(\d{1,2})$/);
+  if (range) {
+    for (let i = +range[1]; i <= +range[2]; i++) wanted.add(String(i).padStart(2, "0"));
+  } else if (/^\d{1,2}$/.test(a)) {
+    wanted.add(a.padStart(2, "0"));
+  }
+}
+const selected = (f) => wanted.size === 0 || wanted.has(f.slice(0, 2));
 const norm = (s) => s.replace(/\r\n/g, "\n").split("\n").map((l) => l.trimEnd()).join("\n").trim();
 
 let fail = 0, skip = 0, pass = 0;
-for (const f of fs.readdirSync(DIR).filter((x) => x.endsWith(".md")).sort()) {
+for (const f of fs.readdirSync(DIR).filter((x) => x.endsWith(".md") && selected(x)).sort()) {
   const raw = fs.readFileSync(path.join(DIR, f), "utf-8");
   const sol = raw.match(/```kotlin solution\n([\s\S]*?)```/);
   const exp = raw.match(/```text expected\n([\s\S]*?)```/);
@@ -45,5 +59,6 @@ for (const f of fs.readdirSync(DIR).filter((x) => x.endsWith(".md")).sort()) {
   }
 }
 fs.rmSync(work, { recursive: true, force: true });
-console.log(`\n정답 검증: 통과 ${pass} · 실패 ${fail} · 건너뜀 ${skip}`);
+const scope = wanted.size ? ` (선택 ${[...wanted].sort().join(",")})` : "";
+console.log(`\n정답 검증${scope}: 통과 ${pass} · 실패 ${fail} · 건너뜀 ${skip}`);
 process.exit(fail ? 1 : 0);

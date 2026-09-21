@@ -1,0 +1,266 @@
+# Lesson 23 — 컬렉션 3 — 정렬·그룹·Sequence
+
+컬렉션 3부작의 마지막입니다. 여기는 **성능과 API 설계**가 걸린 구간이에요. 앞의 두 레슨이 "이 함수를 쓰면 짧아진다"였다면, 이번 것들은 **모르고 쓰면 실제로 느려지거나 캡슐화가 뚫리는** 주제입니다.
+
+## 정렬 — 이름 규칙부터
+
+Kotlin은 **과거형(`sorted`)이면 새 리스트, 원형(`sort`)이면 제자리 변경**입니다.
+
+```kotlin
+val a = list.sortedBy { it.name }   // 새 List 반환, 원본 그대로
+list.sortBy { it.name }             // MutableList 를 제자리에서 정렬, 반환값 Unit
+```
+
+`reversed()`(복사본)와 `asReversed()`(뷰 — 원본이 바뀌면 같이 바뀐다)도 같은 규칙입니다. 실무에서는 거의 항상 과거형을 씁니다.
+
+| 함수 | 쓰는 곳 |
+|---|---|
+| `sorted()` / `sortedDescending()` | `Comparable` 자연 순서 |
+| `sortedBy { }` / `sortedByDescending { }` | 키 하나로 |
+| `sortedWith(comparator)` | 키 **여러 개**, 또는 null 처리가 필요할 때 |
+
+키가 둘 이상이면 `compareBy`와 `thenBy`를 씁니다.
+
+```kotlin
+members.sortedWith(
+    compareBy<Member> { it.team }
+        .thenByDescending { it.score }
+        .thenBy { it.name }
+)
+```
+
+Java의 `Comparator.comparing(...).thenComparing(...)`과 1:1이지만, **`thenByDescending`이 따로 있어 `reversed()` 위치로 헷갈릴 일이 없습니다.**
+
+`null`이 섞인 키는 `nullsLast(compareBy { it.score })` 처럼 감쌉니다. 이걸 모르면 `sortedBy { it.score ?: Int.MIN_VALUE }` 같은 코드가 나오는데, 정렬 기준에 도메인에 없는 값을 섞는 셈이라 좋지 않아요.
+
+### 안티패턴 — `sortedBy` 두 번 체이닝
+
+```kotlin
+members.sortedBy { it.name }.sortedBy { it.team }   // ❌
+```
+
+Kotlin의 정렬은 **안정 정렬(stable sort)**이라 이 코드는 "팀 오름차순, 같은 팀이면 이름 오름차순"으로 **답이 맞습니다.** 그래서 더 위험해요. 문제는 두 가지입니다.
+
+1. **정렬을 두 번** 한다 — `O(2n log n)` + 리스트를 한 벌 더 만든다
+2. **읽는 순서가 거꾸로**다 — 뒤에 쓴 게 1순위 키다
+
+답이 맞는 코드라 "틀렸다"고 못 하고, **"안정 정렬에 기대고 있고 우선순위가 역순으로 읽힙니다. `compareBy().thenBy()` 로 바꾸죠"**라고 지적하는 겁니다.
+
+## 중복과 집합 연산
+
+```kotlin
+names.distinct()                  // equals/hashCode 기준
+members.distinctBy { it.team }    // 키 기준 — 먼저 나온 것이 남는다
+```
+
+`distinctBy`가 **먼저 나온 원소를 남긴다**는 성질이 중요합니다. 정렬과 붙이면 "그룹별 1등 뽑기"가 한 줄이 돼요.
+
+```kotlin
+members.sortedByDescending { it.score }.distinctBy { it.team }   // 팀별 최고점 한 명씩
+```
+
+집합 연산은 `union` / `intersect` / `subtract` 이고 **`Set`을 반환**합니다.
+
+```kotlin
+val both = teamA.intersect(teamB.toSet())     // Set<String>
+val onlyA = teamA.subtract(teamB.toSet())
+```
+
+반환되는 건 `LinkedHashSet`이라 순서가 있긴 하지만, **API 응답이나 로그로 나가는 값이면 명시적으로 정렬**하세요. 순서에 기대는 테스트는 언젠가 깨집니다.
+
+그리고 성능 한 줄. **`List.contains`는 `O(n)`입니다.**
+
+```kotlin
+val blocked: List<String> = loadBlockedIds()
+users.filter { it.id in blocked }        // ❌ O(n*m) — 리뷰에서 반드시 잡을 것
+val blockedSet = blocked.toSet()
+users.filter { it.id in blockedSet }     // O(n)
+```
+
+루프 안에서 리스트를 `contains` 하는 코드는 실무 성능 이슈의 단골입니다.
+
+## 읽기 전용은 불변이 아니다
+
+```kotlin
+val read: List<Int> = mutableListOf(1, 2, 3)
+(read as MutableList<Int>).add(4)     // 컴파일 되고, 실행도 된다
+```
+
+`List<T>`는 **`add`가 없는 인터페이스**일 뿐, 런타임 객체는 여전히 `ArrayList`입니다. Java의 `Collections.unmodifiableList()`처럼 예외를 던져주지도 않아요. 그래서 **캡슐화는 타입이 아니라 복사로 지킵니다.**
+
+```kotlin
+class Cart {
+    private val _items = mutableListOf<Item>()
+    val items: List<Item> get() = _items.toList()   // 스냅샷을 준다
+}
+```
+
+`toList()` 없이 `_items`를 그대로 노출하면, 호출자가 받은 `List`는 **내부 리스트를 가리키는 살아있는 참조**입니다. 내가 나중에 `_items.clear()` 하면 호출자가 들고 있던 목록도 비어요. 반대로 캐스팅 한 번이면 밖에서 내 상태를 바꿀 수도 있고요.
+
+> 리뷰 규칙: **공개 API의 반환 타입에 `MutableList` / `MutableMap`이 보이면 무조건 지적.** 파라미터도 마찬가지 — 받는 쪽이 고치겠다는 선언이 됩니다.
+
+## Sequence — 지연 평가
+
+Kotlin 컬렉션 함수는 **단계마다 새 리스트를 만듭니다.** 10만 건에 `filter → map → first` 를 걸면:
+
+```kotlin
+huge.filter { it.active }   // 통과한 원소로 리스트 1개 생성 (10만 번 검사)
+    .map { it.name }        // 리스트 1개 더 생성 (통과분 전체 변환)
+    .first()                // 그중 첫 원소 하나만 쓰고 나머지는 버린다
+```
+
+`asSequence()`를 붙이면 평가 방향이 **가로로 바뀝니다.** 원소 하나가 파이프라인 끝까지 갔다가 다음 원소가 들어와요. 그래서 `first`/`find`/`take`에서 **조기 종료**가 되고, 중간 리스트가 아예 생기지 않습니다.
+
+```kotlin
+huge.asSequence()
+    .filter { it.active }
+    .map { it.name }
+    .first()          // 조건에 맞는 첫 원소를 찾는 순간 멈춘다
+```
+
+**중간 연산(`filter`/`map`/`take`…)은 아무것도 하지 않습니다.** `toList`/`first`/`count`/`sum`/`fold`/`forEach` 같은 **종단 연산(terminal operation)**이 붙어야 비로소 돕니다. 종단 연산을 안 붙이고 "왜 실행이 안 되죠?" 하는 건 Java Stream에서도 겪었을 실수예요.
+
+**언제 이득인가**
+
+| 상황 | 판단 |
+|---|---|
+| 원소 수만 건 이상 + 단계 여러 개 | Sequence 이득 |
+| `first`/`find`/`take`/`any` 로 조기 종료 | Sequence 이득 (가장 큼) |
+| 원소 수십~수백 개 | **리스트가 빠르다** — 래퍼·이터레이터 오버헤드만 늘어난다 |
+| 단계가 하나뿐 | 의미 없음 |
+| `sorted`/`groupBy` 가 중간에 낌 | 그 지점에서 어차피 전부 모인다 |
+
+작은 컬렉션에 `asSequence()`를 붙여놓고 "최적화했습니다"라고 하는 PR은 오히려 되돌려야 합니다.
+
+### 없는 것에서 만들기 — `generateSequence`
+
+```kotlin
+generateSequence(1) { it * 2 }.take(6).toList()        // [1, 2, 4, 8, 16, 32] 지수 백오프
+generateSequence { readLineOrNull() }                  // 람다가 null 을 내면 종료
+sequence { yield(1); yieldAll(listOf(2, 3)) }          // 코루틴 기반 빌더
+```
+
+무한 수열을 **끝을 정하지 않고** 정의해 두고, 필요한 만큼만 `take`로 가져오는 게 지연 평가의 본모습입니다.
+
+## 리뷰 체크리스트
+
+| 이런 코드를 보면 | 이렇게 제안한다 |
+|---|---|
+| `sortedBy { }.sortedBy { }` | `sortedWith(compareBy().thenBy())` |
+| `sortedBy { it.x ?: 기본값 }` | `sortedWith(nullsLast(compareBy { it.x }))` |
+| 루프 안 `list.contains(...)` | `toSet()` 후 조회 |
+| 공개 프로퍼티/반환 타입이 `MutableList` | `List` + `toList()` 스냅샷 |
+| 10만 건에 `filter{}.map{}.first()` | `asSequence()` + 조기 종료 |
+| 100건짜리에 `asSequence()` | 그냥 리스트 |
+| `asSequence()` 후 종단 연산 없음 | 아무 일도 안 일어난다 |
+
+## 연습
+
+멤버 목록을 정렬·중복 제거·집합 연산으로 다루고, 마지막 두 줄은 Sequence로 만듭니다. `evaluated` 카운터는 **지연 평가가 실제로 몇 번만 돌았는지** 확인하기 위한 것입니다.
+
+```kotlin starter
+data class Member(val name: String, val team: String, val score: Int)
+
+val members = listOf(
+    Member("kim", "backend", 88),
+    Member("lee", "frontend", 92),
+    Member("park", "backend", 95),
+    Member("choi", "frontend", 92),
+    Member("jung", "infra", 70),
+)
+
+val reviewers = listOf("kim", "choi", "yoon")
+
+fun main() {
+    // 1. 팀 오름차순 → 같은 팀이면 점수 내림차순 → 그래도 같으면 이름 오름차순.
+    //    정렬은 한 번만 할 것. 이름을 ", " 로 이어 출력
+    // TODO:
+
+    // 2. 위 정렬 결과에서 팀별 1등만 남겨 이름 출력
+    // TODO:
+
+    // 3. 멤버이면서 리뷰어인 이름 (정렬해서 출력)
+    // TODO:
+
+    // 4. 멤버지만 리뷰어가 아닌 이름 (정렬해서 출력)
+    // TODO:
+
+    // 5. 재시도 백오프 — 1초에서 시작해 2배씩, 6번째까지
+    // TODO:
+
+    // 6. 3의 배수를 만들다가 7로 나누어떨어지는 첫 값을 찾는다.
+    //    100만 개짜리 범위지만 실제 평가는 몇 번만 일어나야 한다
+    var evaluated = 0
+    // TODO:  println("$found (평가 ${evaluated}회)")
+}
+```
+
+```text expected
+park, kim, choi, lee, jung
+park, choi, jung
+[choi, kim]
+[jung, lee, park]
+[1, 2, 4, 8, 16, 32]
+21 (평가 7회)
+```
+
+```text hint
+1번은 정렬 키가 **세 개**입니다. `sortedBy` 를 세 번 이어 붙이면 답은 맞지만(안정 정렬이라) 정렬을 세 번 하는 코드예요. 키가 둘 이상이면 비교자를 하나로 만들어 `sortedWith` 에 넘깁니다. 2번은 "먼저 나온 것을 남긴다"는 성질을 가진 함수가 정렬 뒤에 붙으면 끝납니다.
+---
+도구는 이렇습니다. 비교자 조립은 `compareBy<Member> { }` 에 `.thenByDescending { }` 과 `.thenBy { }`, 대표 뽑기는 `distinctBy { }`, 3·4번은 `intersect` 와 `subtract`(둘 다 `Set` 을 돌려주고, 인자는 `toSet()` 으로 넘겨야 조회가 `O(1)` 입니다), 5번은 `generateSequence(초기값) { 다음값 }` + `take`, 6번은 `asSequence()` + `map` + `first { }`. 이름만 이어 출력할 때는 `joinToString(", ") { it.name }`.
+---
+함정 세 개. (1) `intersect`/`subtract` 가 돌려주는 `Set` 은 순회 순서에 기대면 안 되니 `sorted()` 를 붙여 리스트로 출력합니다. (2) 5번의 `generateSequence` 는 **무한**이라 `take` 없이 `toList()` 를 부르면 영원히 안 끝납니다. (3) 6번에서 `asSequence()` 없이 `(1..1_000_000).map { }` 을 쓰면 100만 개를 전부 평가한 리스트를 만든 뒤에야 첫 값을 찾습니다 — `evaluated` 숫자가 답을 말해줄 거예요. 카운터 증가는 `map` 람다 안에서 합니다.
+---
+뼈대입니다. 빈칸만 채우세요.
+
+1번: `members.sortedWith(compareBy<Member> { it.team }.___ { it.score }.___ { it.name })` 를 `val sorted` 로 받고 `println(sorted.joinToString(", ") { it.name })`
+
+2번: `sorted.___ { it.team }.joinToString(", ") { it.name }`
+
+3번: `members.map { it.name }.___(reviewers.toSet()).sorted()`
+
+4번: `members.map { it.name }.___(reviewers.toSet()).sorted()`
+
+5번: `___(1) { it * 2 }.take(6).toList()`
+
+6번: `val found = (1..1_000_000).___().map { evaluated++; it * 3 }.first { it % 7 == 0 }`
+```
+
+```kotlin solution
+data class Member(val name: String, val team: String, val score: Int)
+
+val members = listOf(
+    Member("kim", "backend", 88),
+    Member("lee", "frontend", 92),
+    Member("park", "backend", 95),
+    Member("choi", "frontend", 92),
+    Member("jung", "infra", 70),
+)
+
+val reviewers = listOf("kim", "choi", "yoon")
+
+fun main() {
+    // 1. 키가 셋이면 비교자를 하나로 조립한다 — sortedBy 를 세 번 잇는 건 정렬을 세 번 하는 것.
+    val sorted = members.sortedWith(
+        compareBy<Member> { it.team }
+            .thenByDescending { it.score }
+            .thenBy { it.name }
+    )
+    println(sorted.joinToString(", ") { it.name })
+
+    // 2. distinctBy 는 먼저 나온 원소를 남긴다 — 정렬 뒤에 붙이면 그룹별 1등이 된다.
+    println(sorted.distinctBy { it.team }.joinToString(", ") { it.name })
+
+    // 3·4. 집합 연산은 Set 을 돌려준다. 출력에 쓸 거면 순회 순서에 기대지 말고 정렬한다.
+    println(members.map { it.name }.intersect(reviewers.toSet()).sorted())
+    println(members.map { it.name }.subtract(reviewers.toSet()).sorted())
+
+    // 5. 무한 수열을 정의해 두고 필요한 만큼만 take 로 가져온다.
+    println(generateSequence(1) { it * 2 }.take(6).toList())
+
+    // 6. asSequence 라 원소 하나씩 파이프라인을 통과한다 — 7번째에서 찾고 즉시 멈춘다.
+    var evaluated = 0
+    val found = (1..1_000_000).asSequence().map { evaluated++; it * 3 }.first { it % 7 == 0 }
+    println("$found (평가 ${evaluated}회)")
+}
+```
