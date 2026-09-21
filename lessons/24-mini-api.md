@@ -2,28 +2,25 @@
 
 23개 레슨을 왔습니다. 이제 흩어져 있던 것들을 **하나의 서비스**로 묶습니다.
 
-만들 것: **사용자 요약 API** — 사용자 정보 + 최근 주문 + 포인트를 한 번에 내려주는 엔드포인트 하나. 작지만 실무에서 백엔드가 하는 일의 축소판입니다. 외부 호출 합성, 부분 실패, DTO 매핑, 계층 분리가 전부 들어있어요.
+만들 것은 **사용자 요약 API** — 사용자 정보 + 최근 주문 + 포인트를 한 번에 내려주는 엔드포인트 하나. 작지만 실무 백엔드의 축소판입니다. 외부 호출 합성, 부분 실패, DTO 매핑, 계층 분리가 전부 들어있어요.
 
 ## 프로젝트 골격
 
 ```
-mini-api/
-├── build.gradle.kts
-└── src/main/kotlin/com/example/miniapi/
-    ├── MiniApiApplication.kt
-    ├── user/
-    │   ├── UserController.kt      # 표현 계층
-    │   ├── UserSummaryService.kt  # 응용 계층
-    │   ├── UserRepository.kt      # 영속 계층
-    │   ├── UserEntity.kt          # 영속 모델
-    │   ├── UserDto.kt             # 표현 모델 + 확장 함수 매핑
-    │   └── ApiResult.kt           # sealed 결과 타입
-    ├── order/
-    └── common/
-        └── GlobalExceptionHandler.kt
+mini-api/src/main/kotlin/com/example/miniapi/
+├── MiniApiApplication.kt
+├── user/
+│   ├── UserController.kt      # 표현 계층
+│   ├── UserSummaryService.kt  # 응용 계층
+│   ├── UserRepository.kt      # 영속 계층
+│   ├── UserEntity.kt          # 영속 모델
+│   ├── UserDto.kt             # 표현 모델 + 확장 함수 매핑
+│   └── ApiResult.kt           # sealed 결과 타입
+├── order/
+└── common/GlobalExceptionHandler.kt
 ```
 
-**계층별 폴더(`controller/`, `service/`, `repository/`)가 아니라 도메인별 폴더**로 잡았습니다. 기능 하나를 고칠 때 파일 3개를 찾아 3개 폴더를 돌아다니지 않아도 돼요. 프로젝트가 커질수록 차이가 벌어집니다.
+**계층별 폴더(`controller/`, `service/`)가 아니라 도메인별 폴더**로 잡았습니다. 기능 하나를 고칠 때 3개 폴더를 돌아다니지 않아도 돼요. 프로젝트가 커질수록 차이가 벌어집니다.
 
 ```kotlin
 // build.gradle.kts
@@ -37,19 +34,16 @@ plugins {
 
 kotlin {
     jvmToolchain(21)
-    compilerOptions {
-        freeCompilerArgs.addAll("-Xjsr305=strict")   // Java 애노테이션을 null 정보로 신뢰
-    }
+    compilerOptions { freeCompilerArgs.add("-Xjsr305=strict") }   // Java 애노테이션을 null 정보로 신뢰
 }
 
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
     implementation("org.springframework.boot:spring-boot-starter-validation")
-    implementation("com.fasterxml.jackson.module:jackson-module-kotlin")      // data class 역직렬화
+    implementation("com.fasterxml.jackson.module:jackson-module-kotlin")   // data class 역직렬화
     implementation("org.jetbrains.kotlin:kotlin-reflect")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactor")        // suspend 컨트롤러
-
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactor")     // suspend 컨트롤러
     runtimeOnly("org.postgresql:postgresql")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
@@ -60,30 +54,18 @@ dependencies {
 }
 ```
 
-**이 세 줄이 Kotlin+Spring 프로젝트의 필수 관문**입니다. 없으면 런타임에 이상한 에러를 만납니다.
+**아래 세 가지가 Kotlin + Spring 프로젝트의 필수 관문**입니다. 없으면 런타임에 이상한 에러를 만납니다.
 
-- `plugin.spring` (= all-open): Spring이 `@Transactional` 프록시를 만들려면 클래스가 `open`이어야 하는데, Kotlin은 final 기본입니다.
-- `plugin.jpa` (= no-arg): JPA는 리플렉션으로 인스턴스를 만들려고 **기본 생성자**를 찾습니다.
+- `plugin.spring`(all-open): Spring이 `@Transactional` 프록시를 만들려면 클래스가 `open`이어야 하는데 Kotlin은 final 기본입니다.
+- `plugin.jpa`(no-arg): JPA는 리플렉션으로 인스턴스를 만들려고 **기본 생성자**를 찾습니다.
 - `-Xjsr305=strict`: Spring이 붙인 `@Nullable`/`@NonNull`을 Kotlin 타입으로 신뢰합니다. 플랫폼 타입 구멍(Lesson 1)을 막아요.
 
 ## 도메인 모델: 엔티티와 DTO는 다른 것
 
-이게 Kotlin 초심자가 **가장 많이 틀리는 부분**입니다.
+Kotlin 초심자가 **가장 많이 틀리는 부분**입니다. 엔티티를 `data class`로 만들면 세 가지가 터집니다.
 
-```kotlin
-// ❌ 엔티티를 data class 로
-@Entity
-data class UserEntity(
-    @Id @GeneratedValue val id: Long = 0,
-    var name: String,
-    var gradeCode: Int,
-)
-```
-
-왜 문제냐면:
-
-1. **`equals`/`hashCode`가 모든 필드를 봅니다.** JPA 엔티티는 **식별자로 동일성을 판단**해야 하는데, `data class`는 이름 하나 바뀌면 다른 객체가 됩니다. `Set`에 넣거나 영속성 컨텍스트에서 비교할 때 터집니다.
-2. **`toString()`이 연관관계를 타고 갑니다.** 지연 로딩 컬렉션을 건드려서 `LazyInitializationException` 또는 N+1 폭발.
+1. **`equals`/`hashCode`가 모든 필드를 봅니다.** JPA 엔티티는 **식별자로 동일성**을 판단해야 하는데, 이름 하나 바뀌면 다른 객체가 됩니다. `Set`에 넣거나 영속성 컨텍스트에서 비교할 때 터져요.
+2. **`toString()`이 연관관계를 타고 갑니다.** 지연 로딩 컬렉션을 건드려 `LazyInitializationException` 또는 N+1 폭발.
 3. **`copy()`가 식별자까지 복사합니다.** 의미상 말이 안 됩니다.
 
 ```kotlin
@@ -105,12 +87,8 @@ class UserEntity(
 
 // ✅ DTO 는 data class — 불변, equals/toString 공짜
 data class UserSummaryResponse(
-    val userId: Long,
-    val name: String,
-    val grade: String,
-    val orderCount: Int,
-    val recentOrder: String,
-    val point: Int,
+    val userId: Long, val name: String, val grade: String,
+    val orderCount: Int, val recentOrder: String, val point: Int,
 )
 ```
 
@@ -119,7 +97,7 @@ data class UserSummaryResponse(
 
 ## 결과 타입: 예외 대신 sealed (Lesson 5)
 
-Kotlin엔 검사 예외(checked exception)가 없습니다. 그래서 **"실패할 수 있다"를 시그니처로 표현하려면 반환 타입을 써야 합니다.**
+Kotlin엔 검사 예외(checked exception)가 없습니다. **"실패할 수 있다"를 시그니처로 표현하려면 반환 타입을 써야 합니다.**
 
 ```kotlin
 sealed interface ApiResult<out T> {
@@ -127,32 +105,24 @@ sealed interface ApiResult<out T> {
     data class NotFound(val what: String) : ApiResult<Nothing>
     data class Failure(val reason: String) : ApiResult<Nothing>
 }
+
+@GetMapping("/users/{id}/summary")
+suspend fun summary(@PathVariable id: Long): ResponseEntity<Any> =
+    when (val result = service.summarize(id)) {
+        is ApiResult.Ok       -> ResponseEntity.ok(result.value)
+        is ApiResult.NotFound -> ResponseEntity.status(404).body(ErrorBody(result.what))
+        is ApiResult.Failure  -> ResponseEntity.status(500).body(ErrorBody(result.reason))
+    }
 ```
 
-`out T` 와 `Nothing`의 조합이 포인트입니다. `Nothing`은 모든 타입의 하위 타입이라, `out` 공변성 덕에 `ApiResult.NotFound`가 **어떤 `ApiResult<T>` 자리에든** 들어갑니다. 실패 케이스마다 제네릭을 안 써도 돼요.
+`out T` 와 `Nothing`의 조합이 포인트입니다. `Nothing`은 모든 타입의 하위 타입이라, `out` 공변성 덕에 `NotFound`가 **어떤 `ApiResult<T>` 자리에든** 들어갑니다. 실패 케이스마다 제네릭을 안 써도 돼요. 그리고 저 `when`은 **`else` 없이 컴파일**되므로, 나중에 `Conflict`를 추가하면 처리 안 한 모든 `when`이 컴파일 에러를 냅니다.
 
-컨트롤러에서 `when`으로 받으면 **`else` 없이 컴파일**됩니다. 나중에 `Conflict`를 추가하면 처리 안 한 모든 `when`이 컴파일 에러를 냅니다.
+**예외 vs sealed, 무엇을 언제?** 제 기준은 이렇습니다.
 
-```kotlin
-@RestController
-class UserController(private val service: UserSummaryService) {
+- **예상 가능한 도메인 실패**(없는 사용자, 재고 부족, 잔액 부족) → **sealed 결과 타입.** 호출자가 처리를 강제당합니다.
+- **진짜 예외적 상황**(DB 커넥션 끊김, 버그) → **예외 + `@RestControllerAdvice`.** 여기까지 타입으로 표현하면 코드가 산으로 갑니다.
 
-    @GetMapping("/users/{id}/summary")
-    suspend fun summary(@PathVariable id: Long): ResponseEntity<Any> =
-        when (val result = service.summarize(id)) {
-            is ApiResult.Ok       -> ResponseEntity.ok(result.value)
-            is ApiResult.NotFound -> ResponseEntity.status(404).body(ErrorBody(result.what))
-            is ApiResult.Failure  -> ResponseEntity.status(500).body(ErrorBody(result.reason))
-        }
-}
-```
-
-**예외 vs sealed 결과, 무엇을 언제?** 제 기준은 이렇습니다.
-
-- **예상 가능한 도메인 실패**(없는 사용자, 재고 부족, 잔액 부족) → **sealed 결과 타입**. 호출자가 처리를 강제당합니다.
-- **진짜 예외적 상황**(DB 커넥션 끊김, 버그) → **예외 + `@RestControllerAdvice`**. 여기까지 타입으로 표현하면 코드가 산으로 갑니다.
-
-둘을 섞어 쓰는 게 정상입니다. 전부 sealed로 하려는 순수주의는 실무에서 지칩니다.
+둘을 섞는 게 정상입니다. 전부 sealed로 하려는 순수주의는 실무에서 지칩니다.
 
 ## 매핑: 확장 함수로 (Lesson 4)
 
@@ -174,12 +144,7 @@ fun UserEntity.toSummary(orders: List<OrderEntity>, point: Int) = UserSummaryRes
 )
 ```
 
-Java에서 MapStruct를 쓰던 자리입니다. 확장 함수가 나은 점:
-
-- **애노테이션 프로세서·빌드 단계가 없습니다.** 생성 코드를 뒤질 일도 없어요.
-- **엔티티 클래스에 매핑 코드가 안 들어갑니다.** 엔티티는 DTO의 존재를 모릅니다 — 의존 방향이 깔끔합니다.
-- 복잡한 변환(`gradeCode` → `"GOLD"`)을 **그냥 Kotlin으로** 씁니다. MapStruct의 `@Mapping(expression = "java(...)")` 같은 문자열 코드가 필요 없어요.
-- `firstOrNull()?.title ?: "없음"` — Lesson 1과 6이 한 줄에 같이 들어갑니다.
+Java에서 MapStruct를 쓰던 자리입니다. 애노테이션 프로세서도, 생성 코드를 뒤질 일도 없어요. **엔티티 클래스에 매핑 코드가 안 들어가서** 의존 방향이 깔끔하고, 복잡한 변환을 `@Mapping(expression = "java(...)")` 같은 문자열이 아니라 **그냥 Kotlin으로** 씁니다. `firstOrNull()?.title ?: "없음"` 한 줄에 Lesson 1과 6이 같이 들어있고요.
 
 ## 병렬 조회: 코루틴으로 (Lesson 23)
 
@@ -195,9 +160,8 @@ class UserSummaryService(
             val user = users.findById(id)
                 ?: return@coroutineScope ApiResult.NotFound("user id=$id")
 
-            // 주문과 포인트는 서로 독립 → 병렬
-            val orderJob = async { orders.findByUserId(id) }
-            val pointJob = async { points.fetch(id) }
+            val orderJob = async { orders.findByUserId(id) }   // 주문과 포인트는
+            val pointJob = async { points.fetch(id) }          // 서로 독립 → 병렬
 
             ApiResult.Ok(user.toSummary(orderJob.await(), pointJob.await()))
         }
@@ -207,59 +171,45 @@ class UserSummaryService(
 }
 ```
 
-두 가지를 짚습니다.
-
 **첫째, 사용자 조회는 병렬이 아닙니다.** 사용자가 없으면 나머지는 할 필요가 없으니까요. *"독립적인 것만 병렬"* — 무작정 다 `async`로 감싸는 게 아닙니다.
 
-**둘째, `try`가 `coroutineScope` 바깥에 있습니다.** 이게 중요해요. `async` 자식이 실패하면 **형제가 취소되고 예외는 `coroutineScope` 경계에서 다시 던져집니다.** `await()` 주위에서만 잡으면 스코프가 예외를 또 던져요. 구조적 동시성은 "자식의 실패는 부모의 실패" 라는 규칙이고, 그래서 **경계 바깥에서 잡아야** 합니다.
+**둘째, `try`가 `coroutineScope` 바깥에 있습니다.** 이게 중요해요. `async` 자식이 실패하면 **형제가 취소되고 예외는 `coroutineScope` 경계에서 다시 던져집니다.** `await()` 주위에서만 잡으면 스코프가 또 던져요. 구조적 동시성은 "자식의 실패는 부모의 실패"라는 규칙이고, 그래서 **경계 바깥에서 잡아야** 합니다.
 
 ## 각 계층에서 Kotlin이 주는 것
 
 | 계층 | Kotlin이 해주는 일 |
 |---|---|
-| **Controller** | `suspend` 함수로 병렬 합성 · sealed + `when` 완전성 · 기본값 있는 쿼리 파라미터 |
-| **Service** | 생성자 주입이 곧 기본 문법(`@Autowired` 불필요) · `coroutineScope` 구조적 동시성 · 확장 함수 매핑 |
-| **Repository** | 인터페이스 그대로 · `?` 로 "없을 수 있음"을 타입에 명시 · `?:` 로 즉시 분기 |
+| **Controller** | `suspend` 로 병렬 합성 · sealed + `when` 완전성 · 기본값 있는 쿼리 파라미터 |
+| **Service** | 생성자 주입이 곧 기본 문법(`@Autowired` 불필요) · `coroutineScope` · 확장 함수 매핑 |
+| **Repository** | `?` 로 "없을 수 있음"을 타입에 명시 · `?:` 로 즉시 분기 |
 | **Model** | 엔티티는 `class`, DTO는 `data class` · 기본값 + 이름 있는 인자로 빌더 대체 |
 | **Test** | 픽스처 팩토리 함수 · MockK `coEvery` · Kotest `StringSpec` |
 
-가장 큰 변화는 **줄 수가 아니라 "컴파일러가 잡아주는 것의 범위"** 입니다. null 누락, `when` 분기 누락, 불변 위반 — Java에서 리뷰어가 눈으로 찾던 것들이 컴파일 에러로 올라옵니다.
+가장 큰 변화는 줄 수가 아니라 **"컴파일러가 잡아주는 것의 범위"** 입니다. null 누락, `when` 분기 누락, 불변 위반 — Java에서 리뷰어가 눈으로 찾던 것들이 컴파일 에러로 올라옵니다.
 
 ## 이 프로젝트를 이력서에 어떻게 쓸까
 
-솔직히 말씀드립니다. **"Kotlin으로 CRUD API를 만들었습니다"는 아무 임팩트가 없습니다.** 5년차 지원자에게 기대하는 건 문법 습득이 아니라 **판단**이에요.
+솔직히 말씀드립니다. **"Kotlin으로 CRUD API를 만들었습니다"는 아무 임팩트가 없습니다.** 5년차에게 기대하는 건 문법 습득이 아니라 **판단**이에요.
 
-### 나쁜 예
+**나쁜 예** — *"Kotlin과 Spring Boot를 사용하여 REST API 개발 / 코루틴을 적용하여 성능 개선 / Kotest, MockK를 활용한 단위 테스트 작성."* "썼다"만 있고 "왜, 그래서 뭐가"가 없습니다. 면접관은 물어볼 게 없어서 넘어갑니다.
 
-> - Kotlin과 Spring Boot를 사용하여 REST API 개발
-> - 코루틴을 적용하여 성능 개선
-> - Kotest, MockK를 활용한 단위 테스트 작성
-
-*"썼다"* 만 있고 *"왜, 그래서 뭐가"* 가 없습니다. 면접관은 여기서 물어볼 게 없어서 넘어갑니다.
-
-### 좋은 예
+**좋은 예:**
 
 > **사용자 요약 API — Kotlin 2.0 / Spring Boot 3.3 / JDK 21**
-> - 독립적인 외부 조회 2건을 `coroutineScope` + `async` 로 병렬화. 순차 호출 대비 응답 시간을 **두 호출의 합 → 최댓값**으로 단축
+> - 독립적인 외부 조회 2건을 `coroutineScope` + `async` 로 병렬화. 응답 시간을 **두 호출의 합 → 최댓값**으로 단축
 > - 도메인 실패(사용자 없음)는 `sealed interface` 반환 타입으로, 시스템 예외는 `@RestControllerAdvice` 로 분리. 컨트롤러의 `when` 이 `else` 없이 컴파일되어 **새 실패 케이스 추가 시 처리 누락이 컴파일 에러로 검출**됨
 > - JPA 엔티티는 `data class` 대신 식별자 기반 `equals/hashCode` 를 가진 일반 클래스로 설계 — 연관관계 `toString()` 으로 인한 지연 로딩 사고 방지
 > - 블로킹 JDBC 호출은 `withContext(Dispatchers.IO)` 로 감싸 main-safety 보장
 
 차이가 보이시죠. **선택 → 근거 → 효과**가 한 줄에 다 있습니다.
 
-### 면접에서 반드시 나올 질문 3개
-
-이 프로젝트를 이력서에 올렸다면, 아래 셋은 **거의 확실히** 물어봅니다. 미리 답을 만들어 두세요.
+**그리고 이 셋은 거의 확실히 물어봅니다.** 미리 답을 만들어 두세요.
 
 1. **"엔티티를 `data class`로 안 한 이유가 뭔가요?"** → 위의 `equals`/`toString`/`copy` 세 가지. 여기서 막히면 "블로그 보고 따라 썼구나"가 들통납니다.
 2. **"가상 스레드를 쓰면 코루틴이 필요 없지 않나요?"** → Lesson 23의 답변. 층이 다르다는 것부터.
 3. **"`async` 하나가 실패하면 어떻게 되나요?"** → 형제 취소 + 부모로 전파 + `coroutineScope` 바깥에서 잡아야 함. 실제로 짜 본 사람만 아는 지점이라 변별력이 큽니다.
 
-### 마지막 조언
-
-**GitHub에 올릴 거면 README에 "왜"를 쓰세요.** 코드는 어차피 다 비슷해 보입니다. *"엔티티와 DTO를 왜 분리했는가"*, *"어디는 병렬이고 어디는 아닌가"* 를 적어두면, 그 README 자체가 포트폴리오입니다.
-
-그리고 **작게 유지하세요.** 기능 20개짜리 미완성 프로젝트보다, 엔드포인트 3개인데 테스트가 있고 설계 근거가 적혀 있는 게 훨씬 강합니다.
+마지막 조언 둘. **GitHub에 올릴 거면 README에 "왜"를 쓰세요.** 코드는 어차피 다 비슷해 보입니다. *"엔티티와 DTO를 왜 분리했는가"*, *"어디는 병렬이고 어디는 아닌가"* 를 적어두면 그 README 자체가 포트폴리오입니다. 그리고 **작게 유지하세요.** 기능 20개짜리 미완성보다, 엔드포인트 3개인데 테스트가 있고 설계 근거가 적힌 게 훨씬 강합니다.
 
 ## 연습
 
