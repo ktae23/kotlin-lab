@@ -1,23 +1,16 @@
 # Lesson 24 — 실전 미니 API 설계 (졸업 과제)
 
-23개 레슨을 왔습니다. 이제 흩어져 있던 것들을 **하나의 서비스**로 묶습니다.
-
-만들 것은 **사용자 요약 API** — 사용자 정보 + 최근 주문 + 포인트를 한 번에 내려주는 엔드포인트 하나. 작지만 실무 백엔드의 축소판입니다. 외부 호출 합성, 부분 실패, DTO 매핑, 계층 분리가 전부 들어있어요.
+23개 레슨을 왔습니다. 이제 흩어져 있던 것들을 **하나의 서비스**로 묶습니다. 만들 것은 **사용자 요약 API** — 사용자 정보 + 최근 주문 + 포인트를 한 번에 내려주는 엔드포인트 하나. 작지만 실무 백엔드의 축소판입니다. 외부 호출 합성, 부분 실패, DTO 매핑, 계층 분리가 전부 들어있어요.
 
 ## 프로젝트 골격
 
 ```
-mini-api/src/main/kotlin/com/example/miniapi/
-├── MiniApiApplication.kt
+com/example/miniapi/
 ├── user/
-│   ├── UserController.kt      # 표현 계층
-│   ├── UserSummaryService.kt  # 응용 계층
-│   ├── UserRepository.kt      # 영속 계층
-│   ├── UserEntity.kt          # 영속 모델
-│   ├── UserDto.kt             # 표현 모델 + 확장 함수 매핑
-│   └── ApiResult.kt           # sealed 결과 타입
-├── order/
-└── common/GlobalExceptionHandler.kt
+│   ├── UserController.kt      # 표현    ├── UserEntity.kt   # 영속 모델
+│   ├── UserSummaryService.kt  # 응용    ├── UserDto.kt      # 표현 모델 + 매핑
+│   ├── UserRepository.kt      # 영속    └── ApiResult.kt    # sealed 결과 타입
+├── order/  └── common/GlobalExceptionHandler.kt
 ```
 
 **계층별 폴더(`controller/`, `service/`)가 아니라 도메인별 폴더**로 잡았습니다. 기능 하나를 고칠 때 3개 폴더를 돌아다니지 않아도 돼요. 프로젝트가 커질수록 차이가 벌어집니다.
@@ -34,54 +27,37 @@ plugins {
 
 kotlin {
     jvmToolchain(21)
-    compilerOptions { freeCompilerArgs.add("-Xjsr305=strict") }   // Java 애노테이션을 null 정보로 신뢰
+    compilerOptions { freeCompilerArgs.add("-Xjsr305=strict") }   // Java 애노테이션 신뢰
 }
 
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
-    implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin")   // data class 역직렬화
     implementation("org.jetbrains.kotlin:kotlin-reflect")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactor")     // suspend 컨트롤러
     runtimeOnly("org.postgresql:postgresql")
 
-    testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("io.kotest:kotest-runner-junit5:5.9.1")
-    testImplementation("io.mockk:mockk:1.13.13")
-    testImplementation("com.ninja-squad:springmockk:4.0.2")
-    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test")
+    testImplementation("io.mockk:mockk:1.13.13")             // + springmockk, coroutines-test
 }
 ```
 
-**아래 세 가지가 Kotlin + Spring 프로젝트의 필수 관문**입니다. 없으면 런타임에 이상한 에러를 만납니다.
-
-- `plugin.spring`(all-open): Spring이 `@Transactional` 프록시를 만들려면 클래스가 `open`이어야 하는데 Kotlin은 final 기본입니다.
-- `plugin.jpa`(no-arg): JPA는 리플렉션으로 인스턴스를 만들려고 **기본 생성자**를 찾습니다.
-- `-Xjsr305=strict`: Spring이 붙인 `@Nullable`/`@NonNull`을 Kotlin 타입으로 신뢰합니다. 플랫폼 타입 구멍(Lesson 1)을 막아요.
+**아래 세 가지가 Kotlin + Spring 프로젝트의 필수 관문**입니다. 없으면 런타임에 이상한 에러를 만나요. `plugin.spring`(all-open)은 Spring이 `@Transactional` 프록시를 만들 수 있게 `open`을 붙여줍니다(Kotlin은 final 기본). `plugin.jpa`(no-arg)는 JPA가 리플렉션으로 찾는 **기본 생성자**를 만들어 줍니다. `-Xjsr305=strict`는 Spring이 붙인 `@Nullable`/`@NonNull`을 Kotlin 타입으로 신뢰해 플랫폼 타입 구멍(Lesson 1)을 막습니다.
 
 ## 도메인 모델: 엔티티와 DTO는 다른 것
 
-Kotlin 초심자가 **가장 많이 틀리는 부분**입니다. 엔티티를 `data class`로 만들면 세 가지가 터집니다.
-
-1. **`equals`/`hashCode`가 모든 필드를 봅니다.** JPA 엔티티는 **식별자로 동일성**을 판단해야 하는데, 이름 하나 바뀌면 다른 객체가 됩니다. `Set`에 넣거나 영속성 컨텍스트에서 비교할 때 터져요.
-2. **`toString()`이 연관관계를 타고 갑니다.** 지연 로딩 컬렉션을 건드려 `LazyInitializationException` 또는 N+1 폭발.
-3. **`copy()`가 식별자까지 복사합니다.** 의미상 말이 안 됩니다.
+Kotlin 초심자가 **가장 많이 틀리는 부분**입니다. 엔티티를 `data class`로 만들면 세 가지가 터집니다. (1) **`equals`/`hashCode`가 모든 필드를 봅니다** — JPA 엔티티는 **식별자로 동일성**을 판단해야 하는데 이름 하나 바뀌면 다른 객체가 됩니다. `Set`에 넣거나 영속성 컨텍스트에서 비교할 때 터져요. (2) **`toString()`이 연관관계를 타고 갑니다** — 지연 로딩 컬렉션을 건드려 `LazyInitializationException` 또는 N+1 폭발. (3) **`copy()`가 식별자까지 복사합니다** — 의미상 말이 안 됩니다.
 
 ```kotlin
 // ✅ 엔티티는 일반 class + 식별자 기반 동등성
 @Entity
 @Table(name = "users")
-class UserEntity(
-    @Column(nullable = false) var name: String,
-    @Column(nullable = false) var gradeCode: Int,
-) {
-    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
-    val id: Long = 0
+class UserEntity(var name: String, var gradeCode: Int) {
+    @Id @GeneratedValue(strategy = GenerationType.IDENTITY) val id: Long = 0
 
     override fun equals(other: Any?): Boolean =
         this === other || (other is UserEntity && id != 0L && id == other.id)
-
     override fun hashCode(): Int = javaClass.hashCode()
 }
 
@@ -92,8 +68,7 @@ data class UserSummaryResponse(
 )
 ```
 
-> **규칙으로 외우세요: 엔티티는 `class`, DTO는 `data class`.**
-> 엔티티는 가변·식별자 기반·영속성 컨텍스트 소속. DTO는 불변·값 기반·경계를 넘나드는 것. 성격이 정반대입니다.
+> **규칙으로 외우세요: 엔티티는 `class`, DTO는 `data class`.** 엔티티는 가변·식별자 기반·영속성 컨텍스트 소속이고, DTO는 불변·값 기반·경계를 넘나드는 것 — 성격이 정반대입니다.
 
 ## 결과 타입: 예외 대신 sealed (Lesson 5)
 
@@ -117,29 +92,17 @@ suspend fun summary(@PathVariable id: Long): ResponseEntity<Any> =
 
 `out T` 와 `Nothing`의 조합이 포인트입니다. `Nothing`은 모든 타입의 하위 타입이라, `out` 공변성 덕에 `NotFound`가 **어떤 `ApiResult<T>` 자리에든** 들어갑니다. 실패 케이스마다 제네릭을 안 써도 돼요. 그리고 저 `when`은 **`else` 없이 컴파일**되므로, 나중에 `Conflict`를 추가하면 처리 안 한 모든 `when`이 컴파일 에러를 냅니다.
 
-**예외 vs sealed, 무엇을 언제?** 제 기준은 이렇습니다.
-
-- **예상 가능한 도메인 실패**(없는 사용자, 재고 부족, 잔액 부족) → **sealed 결과 타입.** 호출자가 처리를 강제당합니다.
-- **진짜 예외적 상황**(DB 커넥션 끊김, 버그) → **예외 + `@RestControllerAdvice`.** 여기까지 타입으로 표현하면 코드가 산으로 갑니다.
-
-둘을 섞는 게 정상입니다. 전부 sealed로 하려는 순수주의는 실무에서 지칩니다.
+**예외 vs sealed, 무엇을 언제?** **예상 가능한 도메인 실패**(없는 사용자, 재고 부족, 잔액 부족)는 **sealed 결과 타입** — 호출자가 처리를 강제당합니다. **진짜 예외적 상황**(DB 커넥션 끊김, 버그)은 **예외 + `@RestControllerAdvice`** — 여기까지 타입으로 표현하면 코드가 산으로 갑니다. 둘을 섞는 게 정상이고, 전부 sealed로 하려는 순수주의는 실무에서 지칩니다.
 
 ## 매핑: 확장 함수로 (Lesson 4)
 
 ```kotlin
 // UserDto.kt — 엔티티는 DTO를 모른다. 의존 방향이 한쪽이다.
-fun Int.toGrade(): String = when (this) {
-    2 -> "GOLD"
-    1 -> "SILVER"
-    else -> "BRONZE"
-}
+fun Int.toGrade(): String = when (this) { 2 -> "GOLD"; 1 -> "SILVER"; else -> "BRONZE" }
 
 fun UserEntity.toSummary(orders: List<OrderEntity>, point: Int) = UserSummaryResponse(
-    userId = id,
-    name = name,
-    grade = gradeCode.toGrade(),
-    orderCount = orders.size,
-    recentOrder = orders.firstOrNull()?.title ?: "없음",
+    userId = id, name = name, grade = gradeCode.toGrade(),
+    orderCount = orders.size, recentOrder = orders.firstOrNull()?.title ?: "없음",
     point = point,
 )
 ```
@@ -159,10 +122,8 @@ class UserSummaryService(
         coroutineScope {
             val user = users.findById(id)
                 ?: return@coroutineScope ApiResult.NotFound("user id=$id")
-
             val orderJob = async { orders.findByUserId(id) }   // 주문과 포인트는
             val pointJob = async { points.fetch(id) }          // 서로 독립 → 병렬
-
             ApiResult.Ok(user.toSummary(orderJob.await(), pointJob.await()))
         }
     } catch (e: IllegalStateException) {
@@ -171,9 +132,7 @@ class UserSummaryService(
 }
 ```
 
-**첫째, 사용자 조회는 병렬이 아닙니다.** 사용자가 없으면 나머지는 할 필요가 없으니까요. *"독립적인 것만 병렬"* — 무작정 다 `async`로 감싸는 게 아닙니다.
-
-**둘째, `try`가 `coroutineScope` 바깥에 있습니다.** 이게 중요해요. `async` 자식이 실패하면 **형제가 취소되고 예외는 `coroutineScope` 경계에서 다시 던져집니다.** `await()` 주위에서만 잡으면 스코프가 또 던져요. 구조적 동시성은 "자식의 실패는 부모의 실패"라는 규칙이고, 그래서 **경계 바깥에서 잡아야** 합니다.
+**첫째, 사용자 조회는 병렬이 아닙니다.** 사용자가 없으면 나머지는 할 필요가 없으니까요. *"독립적인 것만 병렬"* — 무작정 다 `async`로 감싸는 게 아닙니다. **둘째, `try`가 `coroutineScope` 바깥에 있습니다.** 이게 중요해요. `async` 자식이 실패하면 **형제가 취소되고 예외는 `coroutineScope` 경계에서 다시 던져집니다.** `await()` 주위에서만 잡으면 스코프가 또 던져요. 구조적 동시성은 "자식의 실패는 부모의 실패"라는 규칙이고, 그래서 **경계 바깥에서 잡아야** 합니다.
 
 ## 각 계층에서 Kotlin이 주는 것
 
@@ -193,15 +152,13 @@ class UserSummaryService(
 
 **나쁜 예** — *"Kotlin과 Spring Boot를 사용하여 REST API 개발 / 코루틴을 적용하여 성능 개선 / Kotest, MockK를 활용한 단위 테스트 작성."* "썼다"만 있고 "왜, 그래서 뭐가"가 없습니다. 면접관은 물어볼 게 없어서 넘어갑니다.
 
-**좋은 예:**
+**좋은 예** — **선택 → 근거 → 효과**가 한 줄에 다 있습니다.
 
 > **사용자 요약 API — Kotlin 2.0 / Spring Boot 3.3 / JDK 21**
 > - 독립적인 외부 조회 2건을 `coroutineScope` + `async` 로 병렬화. 응답 시간을 **두 호출의 합 → 최댓값**으로 단축
 > - 도메인 실패(사용자 없음)는 `sealed interface` 반환 타입으로, 시스템 예외는 `@RestControllerAdvice` 로 분리. 컨트롤러의 `when` 이 `else` 없이 컴파일되어 **새 실패 케이스 추가 시 처리 누락이 컴파일 에러로 검출**됨
 > - JPA 엔티티는 `data class` 대신 식별자 기반 `equals/hashCode` 를 가진 일반 클래스로 설계 — 연관관계 `toString()` 으로 인한 지연 로딩 사고 방지
 > - 블로킹 JDBC 호출은 `withContext(Dispatchers.IO)` 로 감싸 main-safety 보장
-
-차이가 보이시죠. **선택 → 근거 → 효과**가 한 줄에 다 있습니다.
 
 **그리고 이 셋은 거의 확실히 물어봅니다.** 미리 답을 만들어 두세요.
 
