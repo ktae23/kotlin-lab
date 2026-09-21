@@ -98,16 +98,20 @@ val orders = listOf(
 
 fun main() {
     // 1. PAID 총 금액
-    println(TODO())
+    val paidTotal: Int = TODO("filter + sumOf")
+    println(paidTotal)
 
     // 2. 고객별 PAID 합계 (금액 내림차순)
-    println(TODO())
+    val byCustomer: Map<String, Int> = TODO("groupBy + mapValues, 그리고 정렬")
+    println(byCustomer)
 
     // 3. 상태별 건수
-    println(TODO())
+    val byStatus: Map<String, Int> = TODO("groupingBy + eachCount")
+    println(byStatus)
 
     // 4. 3만원 이상 주문의 고객 이름
-    println(TODO())
+    val bigSpenders: List<String> = TODO("filter + map")
+    println(bigSpenders)
 }
 ```
 

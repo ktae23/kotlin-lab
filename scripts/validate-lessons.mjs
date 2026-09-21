@@ -52,6 +52,12 @@ for (const f of files) {
   if (hintCount) withHint++;
   if (solBlock) withSol++;
 
+  // println(TODO()) 은 Nothing 이 모든 오버로드에 매칭돼 "overload resolution ambiguity" 로 깨진다.
+  // 학습자가 첫 실행에서 레슨과 무관한 에러를 보게 되므로 금지한다.
+  if (starter && /println\s*\(\s*TODO\s*\(/.test(starter[1])) {
+    errs.push("starter 에 `println(TODO())` — 오버로드 모호성으로 컴파일 실패함. 타입 명시된 val 로 받을 것");
+  }
+
   const theoryLines = raw.split(/^##\s*연습\s*$/m)[0].trim().split("\n").length;
 
   if (errs.length) {
