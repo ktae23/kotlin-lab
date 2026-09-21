@@ -202,3 +202,74 @@ fun main() {
 [Dog(두부)]
 Box(size=3)
 ```
+
+```text hint
+변성은 외우는 게 아니라 **T 가 어디에 등장하는지 세어보는 것**입니다. 두 인터페이스를 다시 보세요. `Source` 의 `next(): T` 에서 T 는 **반환 위치**에만, `Sink` 의 `accept(item: T)` 에서 T 는 **파라미터 위치**에만 있습니다. 한쪽은 값을 내보내기만 하고, 다른 쪽은 받아먹기만 해요. 그다음 `main` 의 두 대입을 보세요 — `Source<Dog>` 를 `Source<Animal>` 자리에, `Sink<Animal>` 을 `Sink<Dog>` 자리에 넣습니다. **방향이 반대**죠. 이 두 사실이 짝을 이룹니다.
+---
+키워드는 `out` 과 `in` 둘뿐이고, 붙이는 자리는 **타입 파라미터 선언부** — `interface Source<___ T>` 의 빈칸입니다. 함수 시그니처나 사용하는 쪽이 아니라 **선언 한 곳**에만 붙인다는 게 Java 와 갈리는 지점이에요. 규칙은 하나: 타입이 **밖으로 나가기만** 하면 `out`, **안으로 들어오기만** 하면 `in`. `out` 은 Java 의 `? extends`, `in` 은 `? super` 에 대응합니다. 2번은 `Box<*>` 를 파라미터 타입으로 받으면 되고, 3번은 `is T` 를 쓰려면 함수 앞에 `inline`, 타입 파라미터 앞에 `reified` 가 필요합니다.
+---
+왜 그렇게 되는지 확인하고 가세요. `Source<Dog>` 에서 꺼내면 항상 `Dog` 고, `Dog` 는 `Animal` 이니 **`Source<Animal>` 로 읽어도 절대 안전**합니다 → 그래서 `out`, 하위 타입 방향이 그대로 따라갑니다(공변). 반대로 `Sink<Animal>` 은 `Animal` 이면 뭐든 받으니 `Dog` 만 넣는 `Sink<Dog>` 자리에 놓아도 안전하죠 → `in`, 방향이 뒤집힙니다(반공변). 붙여놓고 반대쪽 위치에 T 를 쓰면 컴파일러가 **"T occurs in 'in' position"** 으로 막아줍니다. `reified` 쪽도 이유가 같습니다 — JVM 은 런타임에 T 를 지우니까, `inline` 으로 **호출 지점에 본문을 복사하면서 T 를 실제 타입으로 박아 넣어야** `is T` 가 성립합니다. `inline` 없는 `reified` 는 문법 오류예요. 마지막으로 `Box<*>` 는 "원소 타입을 모른다" 는 뜻이라 원소는 `Any?` 로만 읽히지만, `size` 는 T 와 무관한 멤버라 **그대로 쓸 수 있습니다.**
+---
+뼈대입니다. 빈칸 네 개만 채우면 됩니다.
+
+`interface Source<___ T> { fun next(): T }` / `interface Sink<___ T> { fun accept(item: T) }`
+
+`fun describe(box: Box<___>): String = "Box(size=${box.size})"`
+
+`inline fun <___ T> List<Any>.pick(): List<T> { val result = mutableListOf<T>(); for (element in this) { if (element ___ T) result.add(element) }; return result }`
+```
+
+```kotlin solution
+open class Animal(val name: String) {
+    override fun toString(): String = "${this::class.simpleName}($name)"
+}
+
+class Dog(name: String) : Animal(name)
+
+// T 가 반환 위치에만 나오면 out(공변), 파라미터 위치에만 나오면 in(반공변). 선언 한 번으로 끝난다.
+interface Source<out T> {
+    fun next(): T
+}
+
+interface Sink<in T> {
+    fun accept(item: T)
+}
+
+class Box<T>(private val items: List<T>) {
+    val size: Int get() = items.size
+}
+
+// Box<*> — 원소 타입은 모르지만 size 는 T 와 무관한 멤버라 그대로 읽을 수 있다.
+fun describe(box: Box<*>): String = "Box(size=${box.size})"
+
+// reified 는 inline 함수에서만 가능하다. 호출 지점에 T 가 코드로 박혀야 is T 가 성립한다.
+inline fun <reified T> List<Any>.pick(): List<T> {
+    val result = mutableListOf<T>()
+    for (element in this) {
+        if (element is T) result.add(element)
+    }
+    return result
+}
+
+fun main() {
+    val dogSource: Source<Dog> = object : Source<Dog> {
+        override fun next(): Dog = Dog("초코")
+    }
+    val animalSink: Sink<Animal> = object : Sink<Animal> {
+        override fun accept(item: Animal) {
+            println("받음: $item")
+        }
+    }
+
+    val source: Source<Animal> = dogSource   // out 이라야 컴파일된다
+    val sink: Sink<Dog> = animalSink         // in 이라야 컴파일된다
+
+    sink.accept(Dog("바둑"))
+    println(source.next().name)
+
+    val mixed: List<Any> = listOf(1, "hello", Dog("두부"), 2, Animal("나비"))
+    println(mixed.pick<Int>())
+    println(mixed.pick<Dog>())
+    println(describe(Box(listOf("a", "b", "c"))))
+}
+```

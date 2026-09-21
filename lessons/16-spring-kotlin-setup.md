@@ -138,7 +138,6 @@ allOpen이 푸는 문제를 **손으로** 겪어 봅니다. Spring 없이, `open
    `[TX] begin` 출력 → `super.place(item)` 호출 → `[TX] commit` 출력 → 결과를 반환합니다.
    (이게 CGLIB이 런타임에 만들어내는 프록시가 하는 일 그대로입니다.)
 2. `canProxy`를 구현하세요. 클래스가 `final`이면 프록시를 만들 수 없으니 `false`입니다.
-   힌트: `java.lang.reflect.Modifier.isFinal(clazz.modifiers)`
 
 `PaymentService`에는 `open`이 없습니다. **여기에 `@Transactional`을 붙였다고 상상해 보세요** — Spring은 프록시를 못 만들고, 트랜잭션은 걸리지 않습니다. `PaymentService`를 상속하려고 시도해 보면 컴파일러가 뭐라고 하는지도 한 번 보세요.
 
@@ -169,4 +168,50 @@ false
 [TX] begin
 [TX] commit
 주문 저장: 키보드
+```
+
+```text hint
+이 연습은 **프록시 = 상속**이라는 등식 하나만 손으로 확인하는 겁니다. Spring이 `@Transactional` 을 걸 때 하는 일은 결국 "원본 클래스를 상속해서, 원래 메서드 앞뒤에 트랜잭션 경계를 두르고, 가운데서 원본을 호출"하는 것뿐이에요. 그러니 클래스가 열려 있지 않으면(=`final`) 애초에 시작조차 못 합니다.
+---
+1번에 쓸 것은 상속 문법 세 가지 — 클래스 선언부의 `: OrderService()`, 메서드 앞의 `override`, 원본 호출인 `super.place(item)` 입니다. 2번은 `java.lang.reflect.Modifier` 의 `isFinal` 과 `Class` 의 `modifiers` 프로퍼티를 씁니다. 학습 서버는 단일 파일을 그대로 컴파일하니 **`import` 없이 `java.lang.reflect.Modifier.isFinal(...)` 처럼 정규화된 이름을 그대로** 적으세요.
+---
+1번에서 `super.place(item)` 의 **반환값을 변수에 받아뒀다가** 돌려줘야 합니다. `[TX] commit` 은 원본 호출이 끝난 **뒤** 찍혀야 하니, 식 본문(`= ...`)으로는 안 되고 블록 본문이 필요해요. 2번은 이름 그대로 뒤집기입니다 — `canProxy` 는 "프록시 가능?"이고 `isFinal` 은 "막혔나?"라서, 둘은 서로 **부정** 관계(`!`)입니다. `OrderService` 는 `open` 이라 `true`, `PaymentService` 는 `open` 이 없어 `false` 가 나옵니다.
+---
+뼈대는 이렇습니다. 빈칸만 채우면 돼요.
+
+`class TxOrderService : ___() { override fun place(item: String): String { println("[TX] begin"); val result = ___; println("[TX] commit"); return result } }`
+
+`fun canProxy(clazz: Class<*>): Boolean = ___java.lang.reflect.Modifier.isFinal(clazz.modifiers)`
+```
+
+```kotlin solution
+open class OrderService {
+    open fun place(item: String): String = "주문 저장: $item"
+}
+
+class PaymentService {  // open 이 없다 = final = 프록시 불가
+    fun pay(amount: Int): String = "결제: ${amount}원"
+}
+
+// CGLIB 이 런타임에 만들어내는 프록시가 하는 일을 손으로 적은 것.
+// 원본을 상속해서 앞뒤에 트랜잭션 경계를 두르고 가운데서 super 로 위임한다.
+class TxOrderService : OrderService() {
+    override fun place(item: String): String {
+        println("[TX] begin")
+        val result = super.place(item)
+        println("[TX] commit")
+        return result
+    }
+}
+
+// final 클래스는 상속이 안 되므로 프록시도 못 만든다. allOpen 플러그인이 푸는 문제가 정확히 이것.
+// 학습 서버는 단일 파일을 그대로 컴파일하므로 import 없이 정규화된 이름을 쓴다.
+fun canProxy(clazz: Class<*>): Boolean =
+    !java.lang.reflect.Modifier.isFinal(clazz.modifiers)
+
+fun main() {
+    println(canProxy(OrderService::class.java))
+    println(canProxy(PaymentService::class.java))
+    println(TxOrderService().place("키보드"))
+}
 ```

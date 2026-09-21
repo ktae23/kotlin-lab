@@ -160,8 +160,6 @@ N+1이 실제로 쿼리를 몇 번 날리는지 **카운터로 세어서** batch
 
 주문은 5건, 회원은 3명입니다. 목표는 **6번 → 2번**.
 
-힌트: `map { it.memberId }.toSet()`, `associateBy { it.id }`, `map.getValue(key)`.
-
 ```kotlin starter
 data class MemberRow(val id: Long, val name: String)
 data class OrderRow(val id: Long, val memberId: Long)
@@ -236,4 +234,92 @@ fun main() {
 [N+1] 쿼리 실행 횟수: 6
 [batch] 결과 동일: true
 [batch] 쿼리 실행 횟수: 2
+```
+
+```text hint
+먼저 **쿼리 카운터가 어디서 오르는지**를 눈으로 짚으세요. `FakeDb` 의 조회 메서드 세 개가 전부 호출되는 순간 `queryCount++` 를 합니다. 즉 이 숫자는 "SQL 문장의 종류" 가 아니라 **DB 를 몇 번 때렸는가**예요. 1번 함수는 목록 1번 + 주문 5건 각각 1번 = 6번. 2번 함수가 2번이 되려면 회원 조회가 **주문을 도는 루프 밖으로** 나와야 합니다. 회원이 3명인데 쿼리는 3번이 아니라 1번이라는 점도 같이 보세요.
+---
+1번은 `orders.map { }` 안에서 `FakeDb.findMemberById(order.memberId)` 를 부르면 그대로 N+1 입니다. 2번에 필요한 도구는 셋 — id 모으기 `map { it.memberId }.toSet()`, 결과를 맵으로 뒤집기 `associateBy { it.id }`, 꺼내 쓰기 `getValue(key)`. `getValue` 는 대괄호 접근과 달리 **non-null 을 반환**해서 `!!` 나 `?:` 가 필요 없습니다.
+---
+batch 는 로직을 바꾸는 게 아니라 **조회 시점을 앞으로 옮기는 것**입니다. 순서는 ① 주문 조회 ② `memberId` 를 `toSet()` 으로 중복 제거 ③ `findMembersByIds` 를 한 번 ④ `associateBy` 로 `id -> MemberRow` 맵 ⑤ **다시 `orders` 를 돌며** 맵에서 꺼내 문자열 생성. 마지막이 핵심이에요 — 회원이 아니라 **주문을 기준으로 돌아야** 결과의 순서와 중복(주문 101·103 이 같은 회원)이 1번과 똑같아집니다. `toSet()` 을 빼도 출력은 같지만 실제 DB 라면 `in` 절에 중복 id 가 실리죠. Hibernate 의 `default_batch_fetch_size` 가 내부에서 하는 일이 정확히 이 다섯 단계입니다.
+---
+뼈대는 이렇습니다.
+
+1번: `val orders = FakeDb.findAllOrders()` 뒤에 `return orders.map { order -> "주문 ${order.id} -> ${FakeDb.___(order.memberId).name}" }`
+
+2번: `val memberIds = orders.map { ___ }.toSet()` → `val memberById = FakeDb.findMembersByIds(memberIds).___ { it.id }` → `return orders.map { order -> "주문 ${order.id} -> ${memberById.___(order.memberId).name}" }`
+```
+
+```kotlin solution
+data class MemberRow(val id: Long, val name: String)
+data class OrderRow(val id: Long, val memberId: Long)
+
+object FakeDb {
+    var queryCount = 0
+        private set
+
+    private val members = listOf(
+        MemberRow(1L, "박경태"),
+        MemberRow(2L, "김하나"),
+        MemberRow(3L, "이두리"),
+    )
+
+    private val orders = listOf(
+        OrderRow(101L, 1L),
+        OrderRow(102L, 2L),
+        OrderRow(103L, 1L),
+        OrderRow(104L, 3L),
+        OrderRow(105L, 2L),
+    )
+
+    fun reset() {
+        queryCount = 0
+    }
+
+    fun findAllOrders(): List<OrderRow> {
+        queryCount++
+        return orders
+    }
+
+    fun findMemberById(id: Long): MemberRow {
+        queryCount++
+        return members.first { it.id == id }
+    }
+
+    fun findMembersByIds(ids: Collection<Long>): List<MemberRow> {
+        queryCount++
+        return members.filter { it.id in ids }
+    }
+}
+
+// LAZY 프록시를 주문마다 하나씩 건드리는 모양. 목록 1번 + 주문 5건 = 6번.
+fun loadWithNPlusOne(): List<String> {
+    val orders = FakeDb.findAllOrders()
+    return orders.map { order ->
+        val member = FakeDb.findMemberById(order.memberId)   // 여기가 N 번 돈다
+        "주문 ${order.id} -> ${member.name}"
+    }
+}
+
+// default_batch_fetch_size 가 하는 일: id 를 모아 where id in (...) 한 방. 목록 1번 + 회원 1번 = 2번.
+fun loadWithBatch(): List<String> {
+    val orders = FakeDb.findAllOrders()
+    val memberIds = orders.map { it.memberId }.toSet()      // 중복 제거 — 회원 3명
+    val memberById = FakeDb.findMembersByIds(memberIds).associateBy { it.id }
+    return orders.map { order ->
+        "주문 ${order.id} -> ${memberById.getValue(order.memberId).name}"
+    }
+}
+
+fun main() {
+    FakeDb.reset()
+    val lazyResult = loadWithNPlusOne()
+    lazyResult.forEach { println(it) }
+    println("[N+1] 쿼리 실행 횟수: ${FakeDb.queryCount}")
+
+    FakeDb.reset()
+    val batchResult = loadWithBatch()
+    println("[batch] 결과 동일: ${batchResult == lazyResult}")
+    println("[batch] 쿼리 실행 횟수: ${FakeDb.queryCount}")
+}
 ```

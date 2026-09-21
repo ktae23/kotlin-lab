@@ -8,6 +8,8 @@ const DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "lesso
 const files = fs.readdirSync(DIR).filter((f) => f.endsWith(".md")).sort();
 
 let bad = 0;
+let withHint = 0;
+let withSol = 0;
 for (const f of files) {
   const raw = fs.readFileSync(path.join(DIR, f), "utf-8");
   const errs = [];
@@ -35,6 +37,21 @@ for (const f of files) {
     if (banned) errs.push(`허용되지 않은 import: ${banned.map((s) => s.trim()).join(", ")}`);
   }
 
+  // 힌트 / 정답 (선택이지만 커버리지를 보고한다)
+  const hintBlock = raw.match(/```text hint\n([\s\S]*?)```/);
+  const solBlock = raw.match(/```kotlin solution\n([\s\S]*?)```/);
+  const hintCount = hintBlock
+    ? hintBlock[1].split(/^---$/m).map((h) => h.trim()).filter(Boolean).length
+    : 0;
+  if (hintBlock && hintCount < 2) errs.push(`힌트 단계 ${hintCount}개 (--- 로 2단계 이상 나눠야 함)`);
+  if (solBlock && !/fun\s+main\s*\(/.test(solBlock[1])) errs.push("정답에 `fun main()` 없음");
+  if (solBlock) {
+    const banned = solBlock[1].match(/^\s*import\s+(?!kotlin[x]?\.)([\w.]+)/gm);
+    if (banned) errs.push(`정답에 허용되지 않은 import: ${banned.map((s) => s.trim()).join(", ")}`);
+  }
+  if (hintCount) withHint++;
+  if (solBlock) withSol++;
+
   const theoryLines = raw.split(/^##\s*연습\s*$/m)[0].trim().split("\n").length;
 
   if (errs.length) {
@@ -42,9 +59,10 @@ for (const f of files) {
     console.log(`✗ ${f}`);
     for (const e of errs) console.log(`    - ${e}`);
   } else {
-    console.log(`✓ ${f}  (이론 ${theoryLines}줄)`);
+    console.log(`✓ ${f}  (이론 ${theoryLines}줄, 힌트 ${hintCount}단계, 정답 ${solBlock ? "○" : "✗"})`);
   }
 }
 
 console.log(`\n${files.length}개 중 ${files.length - bad}개 통과, ${bad}개 실패`);
+console.log(`힌트 ${withHint}/${files.length} · 정답 ${withSol}/${files.length}`);
 process.exit(bad ? 1 : 0);

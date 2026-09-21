@@ -189,3 +189,52 @@ zip: 김(30)
 zip: 이(40)
 zip: 박(50)
 ```
+
+```text hint
+Flow 연산자는 **붙인 순서가 곧 파이프의 위아래**입니다. `collect` 위에 달린 건 전부 업스트림이고, 값 **하나**가 파이프 끝까지 내려간 뒤에야 다음 값이 출발합니다. 1번에서 `로그:` 와 `수집:` 이 번갈아 찍히는 이유가 바로 이것 — `onEach` 를 `collect` **위**에 달았기 때문입니다.
+---
+쓸 연산자는 이미 import 에 다 들어 있습니다. 1번은 `filter` → `map` → `onEach` → `onCompletion` → `collect`, 2번은 `flatMapConcat`, 3번은 `zip`. `onCompletion` 의 람다 파라미터는 종료 원인(`cause`)이라 이번 연습에서는 안 써도 됩니다.
+---
+`flatMapConcat` 의 람다는 값이 아니라 **Flow 를 반환**해야 합니다. `"A"` 하나로 두 값을 만들려면 그 자리에서 `flowOf(...)` 를 새로 열면 돼요. `concat` 이라 앞 Flow 를 끝까지 소진한 뒤 다음 Flow 를 열기 때문에 `A-1, A-2, B-1, B-2` 순서가 보장됩니다. 참고로 `flatMapConcat` 은 `@FlowPreview` 라 `@OptIn(FlowPreview::class)` 이 필요한데, starter 의 `main` 에 이미 붙어 있습니다. `zip` 은 수신 Flow에 상대 Flow와 결합 람다를 함께 넘겨 **양쪽에서 한 개씩 짝**을 맞춥니다.
+---
+뼈대는 이렇습니다. 세 파이프라인 모두 마지막이 `collect` 로 끝나요.
+
+1번: `flowOf(1, 2, 3, 4, 5).filter { ___ }.map { ___ }.onEach { println("로그: $it") }.onCompletion { ___ }.collect { ___ }`
+
+2번: `flowOf("A", "B").flatMapConcat { id -> ___ }.collect { println("펼침: $it") }`
+
+3번: `flowOf("김", "이", "박").zip(___) { name, age -> ___ }.collect { println("zip: $it") }`
+```
+
+```kotlin solution
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.flatMapConcat
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onCompletion
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.zip
+import kotlinx.coroutines.runBlocking
+
+@OptIn(FlowPreview::class)
+fun main() = runBlocking {
+    // 1) onEach 는 업스트림이라 collect 보다 먼저 돈다 → 로그/수집이 번갈아 찍힌다.
+    flowOf(1, 2, 3, 4, 5)
+        .filter { it % 2 == 1 }
+        .map { "ORD-$it" }
+        .onEach { println("로그: $it") }
+        .onCompletion { println("파이프라인 완료") }
+        .collect { println("수집: $it") }
+
+    // 2) flatMapConcat 은 앞 Flow 를 끝까지 소진한 뒤 다음 Flow 를 연다 → 입력 순서 보장.
+    flowOf("A", "B")
+        .flatMapConcat { id -> flowOf("$id-1", "$id-2") }
+        .collect { println("펼침: $it") }
+
+    // 3) zip 은 양쪽에서 한 개씩 짝을 맞춰 방출한다. 짧은 쪽에서 끝난다.
+    flowOf("김", "이", "박")
+        .zip(flowOf(30, 40, 50)) { name, age -> "$name($age)" }
+        .collect { println("zip: $it") }
+}
+```

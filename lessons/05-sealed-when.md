@@ -111,3 +111,40 @@ fun main() {
 실패(503): 서비스 불가
 로딩 중
 ```
+
+```text hint
+`main`이 `ApiResult.Success(...)`, `ApiResult.Loading` 처럼 **`ApiResult.` 를 앞에 붙여** 호출하고 있습니다. 이 한 가지가 세 하위 타입을 **어디에 선언해야 하는지**를 알려 줍니다. 그리고 `else` 없이 컴파일돼야 한다는 조건은, 컴파일러가 **하위 타입 목록 전체를 알고 있을 때만** 성립합니다 — 그걸 보장하는 키워드가 무엇이었죠?
+---
+필요한 건 `sealed interface` 선언과 그 **안에 중첩된** 세 타입, 그리고 `when (result)` + `is` 입니다. 데이터를 담는 둘과 담지 않는 하나는 **선언 방식이 다릅니다.**
+---
+`Success`/`Failure`는 각자 다른 값을 들고 다니니 `data class`, `Loading`은 상태가 없어 **인스턴스가 하나면 충분**하니 `data object`(싱글턴)입니다. 이 차이가 `when` 분기에도 그대로 드러나요 — 타입을 검사해야 하는 쪽은 `is ApiResult.Success ->` 로 쓰고 그 순간 스마트 캐스트되어 `result.data`를 캐스팅 없이 바로 쓰지만, `Loading`은 **값이 하나뿐**이라 `is` 없이 `ApiResult.Loading ->` 로 동등 비교합니다. 출력 문구는 문자열 템플릿 `"실패(${result.code}): ${result.message}"` 처럼 만드세요.
+---
+뼈대는 이렇습니다.
+
+`sealed interface ApiResult { ... }` 안에 `data class Success(val data: String) : ApiResult` 를 먼저 넣고, 같은 자리에 `Failure`(`data class`, 파라미터 둘)와 `Loading`(`data ___`)을 나란히 선언하세요.
+
+`describe` 는 `fun describe(result: ApiResult): String = when (result) { ___ }` 이고, 중괄호 안은 `is ApiResult.Success -> "성공: ${result.data}"` 를 포함한 **세 줄**입니다. `else` 는 없습니다.
+```
+
+```kotlin solution
+// 하위 타입을 인터페이스 안에 중첩해 ApiResult.Success 로 접근하게 한다.
+// 데이터가 없는 Loading 은 인스턴스가 하나뿐이니 data object.
+sealed interface ApiResult {
+    data class Success(val data: String) : ApiResult
+    data class Failure(val code: Int, val message: String) : ApiResult
+    data object Loading : ApiResult
+}
+
+// else 가 없어도 컴파일된다 = 컴파일러가 하위 타입 전체를 알고 있다는 증거.
+fun describe(result: ApiResult): String = when (result) {
+    is ApiResult.Success -> "성공: ${result.data}"
+    is ApiResult.Failure -> "실패(${result.code}): ${result.message}"
+    ApiResult.Loading -> "로딩 중"
+}
+
+fun main() {
+    println(describe(ApiResult.Success("주문 12건")))
+    println(describe(ApiResult.Failure(503, "서비스 불가")))
+    println(describe(ApiResult.Loading))
+}
+```

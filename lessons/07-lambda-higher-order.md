@@ -178,3 +178,51 @@ fun main() {
 A-2
 null
 ```
+
+```text hint
+세 과제의 성격이 다릅니다. 1번은 **함수를 값으로 받아 쓰는 쪽**, 2번은 **inline 이 왜 필요한지 몸으로 아는 쪽**, 3번은 **람다 대신 이름을 넘기는 쪽**이에요. 1번부터 보면, 시그니처는 이미 주어져 있습니다 — `discount: (Order) -> Int`. 이건 그냥 **파라미터**고, 본문에서 `discount(어떤주문)` 처럼 **호출하면 됩니다.** Java 의 `Function<Order,Integer> f` 를 받아 `f.apply(o)` 하던 것과 정확히 같되, `.apply` 가 없을 뿐이에요.
+---
+쓸 도구입니다. 1번은 확장 함수라 수신 객체가 곧 `this` — `this.sumOf { }` 를 `sumOf { }` 로 줄여 쓸 수 있고, 각 원소마다 `it.amount - discount(it)` 를 내놓으면 됩니다. 2번은 stdlib `find` 금지니까 `for (element in this)` 루프 + 조건 만족 시 `return element`, 끝까지 못 찾으면 `return null`. 3번은 **최상위 함수**로 선언해야 `::vipDiscount` 로 참조할 수 있습니다 (클래스 안이면 `Something::vipDiscount` 가 돼요).
+---
+2번에서 `inline` 을 빼면 어떻게 되는지가 이 연습의 핵심입니다. 사실 `firstMatching` 자체의 `return` 은 inline 없이도 됩니다 — 하지만 **호출하는 쪽**이 넘긴 람다 안에서 `return` 을 쓰려면 inline 이 필수예요. 그리고 `predicate(element)` 호출이 매번 `Function1.invoke()` 라는 인터페이스 호출이 되는데, `inline` 을 붙이면 컴파일러가 본문과 람다를 호출 지점에 **복사**해서 그냥 for 루프로 만들어 버립니다. 객체 할당 0, 가상 호출 0. `filter`·`map`·`let` 이 전부 inline 인 이유가 이것이고, 그래서 `forEach` 안의 `return` 이 바깥 함수를 끝낼 수 있는 겁니다. 반환 타입 `T?` 는 "못 찾으면 null" 을 타입으로 말하는 것 — Java 의 `Optional<T>` 자리입니다.
+---
+뼈대입니다. 빈칸을 채우세요.
+
+`fun List<Order>.totalWith(discount: (Order) -> Int): Int = sumOf { it.amount - ___ }`
+
+`inline fun <T> List<T>.firstMatching(predicate: (T) -> Boolean): T? { for (element in this) { if (___) return ___ }; return null }`
+
+`fun vipDiscount(order: Order): Int = if (order.vip) ___ else 0`
+```
+
+```kotlin solution
+data class Order(val id: String, val amount: Int, val vip: Boolean)
+
+// 할인 정책을 (Order) -> Int 라는 "타입"으로 받는다. Java 의 Function<Order,Integer> 자리.
+fun List<Order>.totalWith(discount: (Order) -> Int): Int =
+    sumOf { it.amount - discount(it) }
+
+// inline 이라 람다가 호출 지점에 펼쳐진다 — 객체 할당 없이 그냥 for 루프가 되고, non-local return 도 가능해진다.
+inline fun <T> List<T>.firstMatching(predicate: (T) -> Boolean): T? {
+    for (element in this) {
+        if (predicate(element)) return element
+    }
+    return null
+}
+
+// 최상위 함수라야 ::vipDiscount 로 참조할 수 있다.
+fun vipDiscount(order: Order): Int = if (order.vip) order.amount / 10 else 0
+
+fun main() {
+    val orders = listOf(
+        Order("A-1", 10_000, vip = true),
+        Order("A-2", 20_000, vip = false),
+        Order("A-3", 30_000, vip = true),
+    )
+
+    println(orders.totalWith { 0 })
+    println(orders.totalWith(::vipDiscount))
+    println(orders.firstMatching { it.amount >= 20_000 }?.id)
+    println(orders.firstMatching { it.amount > 100_000 }?.id)
+}
+```

@@ -207,3 +207,79 @@ level: INFO -> DEBUG
 DEBUG
 [buzz]
 ```
+
+```text hint
+이 연습에는 같은 키워드 `by` 가 **두 가지 다른 의미**로 나옵니다. 1번은 클래스 위임 — "이 인터페이스 구현을 통째로 다른 객체에게 넘겨라". 2번과 3번은 프로퍼티 위임 — "이 프로퍼티의 읽기/쓰기를 다른 객체에게 넘겨라". 먼저 `expected` 출력을 보세요. `save` 에는 로그가 안 찍히고, `schema` 를 두 번 읽었는데 로딩 메시지는 **한 번만** 나옵니다. 이 두 가지가 각각 무엇을 증명하는지 생각해 보면 방향이 잡힙니다.
+---
+쓸 도구를 나열합니다. 클래스 위임은 상속하듯 콜론 뒤에 `: OrderRepository by inner`. 프로퍼티는 각각 `by lazy { }`, `by Delegates.observable(초기값) { _, old, new -> }`, `by TrimDelegate()`. 커스텀 위임은 **인터페이스를 구현할 필요가 없습니다** — `operator fun getValue(...)` 와 `operator fun setValue(...)` 라는 **이름만 맞으면** 컴파일러가 알아서 연결합니다. `import` 두 줄은 starter 에 이미 있으니 그대로 두세요.
+---
+구조를 짚습니다. `LoggingRepository` 에서 `save` 를 **일부러 안 쓰는 게 답**입니다 — `by inner` 가 위임 메서드를 자동 생성하고, 직접 `override` 한 `find` 만 내 구현이 이깁니다. 생성자 파라미터 `private val inner` 를 `by` 절에 그대로 쓸 수 있어요. `by lazy { }` 의 블록은 **최초 접근 때 딱 한 번** 실행되므로 `println` 을 블록 안에 넣어야 "한 번만" 이 증명됩니다 (블록의 마지막 식이 프로퍼티 값이 되니 `"v1"` 을 끝에 두세요). `observable` 은 setter 가 호출될 때마다 `(프로퍼티, 이전값, 새값)` 세 개를 넘겨주는데, 첫 번째는 안 쓰니 `_` 로 버립니다. `TrimDelegate` 는 `val` 이면 `getValue` 만, `var` 면 둘 다 필요하고 — `owner` 는 대입을 받으니 `var` 입니다. `setValue` 의 세 번째 파라미터가 대입된 새 값이므로, **저장 직전에** `.trim()` 을 걸면 됩니다.
+---
+뼈대입니다. 빈칸을 채우세요.
+
+`class LoggingRepository(private val inner: OrderRepository) : OrderRepository ___ inner { override fun find(id: String): String { println("조회 시작: $id"); return ___ } }`
+
+`class TrimDelegate(private var value: String = "") { operator fun getValue(thisRef: Any?, property: KProperty<*>): String = ___; operator fun setValue(thisRef: Any?, property: KProperty<*>, newValue: String) { value = ___ } }`
+
+`class Settings { val schema: String by ___ { println("스키마 로딩(한 번만)"); "v1" }; var level: String by Delegates.___("INFO") { _, old, new -> println("level: $old -> $new") }; var owner: String by ___ }`
+```
+
+```kotlin solution
+import kotlin.properties.Delegates
+import kotlin.reflect.KProperty
+
+interface OrderRepository {
+    fun find(id: String): String
+    fun save(id: String)
+}
+
+class InMemoryRepository : OrderRepository {
+    override fun find(id: String): String = "Order($id)"
+    override fun save(id: String) {
+        println("저장: $id")
+    }
+}
+
+// by inner 가 save 위임 메서드를 자동 생성한다. 직접 override 한 find 만 내 구현이 이긴다.
+class LoggingRepository(private val inner: OrderRepository) : OrderRepository by inner {
+    override fun find(id: String): String {
+        println("조회 시작: $id")
+        return inner.find(id)
+    }
+}
+
+class TrimDelegate(private var value: String = "") {
+    operator fun getValue(thisRef: Any?, property: KProperty<*>): String = value
+    operator fun setValue(thisRef: Any?, property: KProperty<*>, newValue: String) {
+        value = newValue.trim()
+    }
+}
+
+class Settings {
+    // lazy 블록은 최초 접근 때 딱 한 번 실행된다 — 두 번째 읽기에서는 로딩 로그가 안 찍힌다.
+    val schema: String by lazy {
+        println("스키마 로딩(한 번만)")
+        "v1"
+    }
+
+    var level: String by Delegates.observable("INFO") { _, old, new ->
+        println("level: $old -> $new")
+    }
+
+    var owner: String by TrimDelegate()
+}
+
+fun main() {
+    val repo = LoggingRepository(InMemoryRepository())
+    println(repo.find("A-1"))
+    repo.save("A-1")
+
+    val settings = Settings()
+    println(settings.schema)
+    println(settings.schema)
+    settings.level = "DEBUG"
+    println(settings.level)
+    settings.owner = "   buzz   "
+    println("[${settings.owner}]")
+}
+```

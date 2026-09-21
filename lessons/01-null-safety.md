@@ -111,8 +111,6 @@ val name: String? = legacyJavaService.findName()  // 명시하면 컴파일러�
 
 **조건: `if` 문과 `!!` 를 하나도 쓰지 않고** 한 줄로 가능합니다.
 
-힌트: `?.`, `?:`, 그리고 빈 문자열 처리에는 `takeIf { }` 또는 `ifEmpty { }`.
-
 ```kotlin starter
 data class Address(val city: String?)
 data class Customer(val address: Address?)
@@ -137,4 +135,37 @@ N/A
 N/A
 N/A
 N/A
+```
+
+```text hint
+`?.` 는 **앞이 null이면 뒤를 통째로 건너뛰고 null을 내놓습니다.** 그래서 `order?.customer?.address?.city` 까지 한 번에 이을 수 있어요. 중간에 뭐가 null이든 결과는 그냥 null입니다.
+---
+빈 문자열을 어떻게 "실패"로 만들까요? `takeIf { }` 는 **조건이 거짓이면 null을 반환**합니다. 즉 `"".takeIf { it.isNotEmpty() }` 는 null이 돼요. 실패 경로를 전부 null로 모으는 게 핵심입니다.
+---
+모든 실패가 null로 모였다면, 마지막은 `?:` 하나로 끝납니다. `?:` 는 왼쪽이 null일 때만 오른쪽을 씁니다. 대문자 변환(`uppercase()`)을 `?:` **앞**에 둘지 뒤에 둘지 생각해 보세요 — null 위에서는 `uppercase()` 를 부를 수 없으니 `?.` 로 이어야 합니다.
+---
+뼈대는 이렇습니다. 빈칸 두 개만 채우면 돼요.
+
+`order?.customer?.address?.city?.takeIf { ___ }?.uppercase() ?: ___`
+```
+
+```kotlin solution
+data class Address(val city: String?)
+data class Customer(val address: Address?)
+data class Order(val customer: Customer?)
+
+// 실패 경로(널 체인 + 빈 문자열)를 전부 null 로 모은 뒤, 마지막에 ?: 한 번으로 받는다.
+fun getCity(order: Order?): String =
+    order?.customer?.address?.city
+        ?.takeIf { it.isNotEmpty() }
+        ?.uppercase()
+        ?: "N/A"
+
+fun main() {
+    println(getCity(Order(Customer(Address("seoul")))))
+    println(getCity(Order(Customer(Address(null)))))
+    println(getCity(Order(Customer(Address("")))))
+    println(getCity(Order(null)))
+    println(getCity(null))
+}
 ```

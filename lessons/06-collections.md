@@ -85,8 +85,6 @@ val first: User? = users.firstOrNull { it.active }           // 없으면 null
 3. **상태별 주문 건수** 맵
 4. 3만원 이상 주문의 **고객 이름 목록**
 
-힌트: `sumOf`, `groupBy` + `mapValues`, `toList().sortedByDescending{}.toMap()`, `groupingBy{}.eachCount()`, `filter` + `map`.
-
 ```kotlin starter
 data class Order(val id: Int, val customer: String, val amount: Int, val status: String)
 
@@ -118,4 +116,56 @@ fun main() {
 {kim=47000, lee=21000}
 {PAID=3, PENDING=1, CANCELED=1}
 [kim]
+```
+
+```text hint
+네 줄 모두 "리스트를 하나의 값으로 접는" 일입니다. 먼저 각 줄이 **최종적으로 무슨 타입을 내놔야 하는지** 적어보세요 — 1번은 `Int`, 2번과 3번은 `Map`, 4번은 `List<String>`. 목표 타입이 정해지면 쓸 함수는 거의 자동으로 좁혀집니다. Java 였다면 `Collectors.___` 자리에 들어갈 이름이 Kotlin 에서는 그냥 확장 함수 이름이에요.
+---
+도구는 이렇습니다. 합계는 `sumOf { }`, 키로 묶는 건 `groupBy { }`, 묶인 값을 다시 가공하는 건 `mapValues { }`, **건수만** 필요하면 `groupBy` 대신 `groupingBy { }.eachCount()`. 마지막 줄은 `filter` + `map` 이면 끝납니다. 3번에서 `groupBy` 로 리스트를 만든 뒤 `size` 를 세는 것도 답은 맞지만, 중간 리스트를 만들지 않는 `groupingBy` 쪽이 이 레슨이 노리는 지점입니다.
+---
+까다로운 건 2번의 **정렬**입니다. `Map` 에는 정렬 함수가 없어요. 그래서 `toList()` 로 `List<Pair<String, Int>>` 를 만들고 → `sortedByDescending { }` 로 값 기준 정렬 → `toMap()` 으로 되돌립니다. `toMap()` 이 만드는 건 `LinkedHashMap` 이라 **방금 잡은 순서가 그대로 유지**됩니다. 이게 Java 의 `LinkedHashMap::new` 를 넘기던 `Collectors.toMap` 3인자 버전을 대신해요. 3번의 출력 순서(`PAID, PENDING, CANCELED`)도 같은 이유 — `eachCount()` 는 **처음 등장한 순서**를 지킵니다.
+---
+뼈대입니다. 빈칸만 채우세요.
+
+1번: `orders.filter { it.status == "PAID" }.___ { it.amount }`
+
+2번: `orders.filter { ... }.groupBy { it.customer }.mapValues { (_, list) -> list.sumOf { ___ } }.toList().sortedByDescending { ___ }.toMap()`
+
+3번: `orders.___ { it.status }.eachCount()`
+
+4번: `orders.filter { it.amount >= ___ }.map { ___ }`
+```
+
+```kotlin solution
+data class Order(val id: Int, val customer: String, val amount: Int, val status: String)
+
+val orders = listOf(
+    Order(1, "kim", 15_000, "PAID"),
+    Order(2, "lee", 8_000, "PENDING"),
+    Order(3, "kim", 32_000, "PAID"),
+    Order(4, "park", 5_000, "CANCELED"),
+    Order(5, "lee", 21_000, "PAID"),
+)
+
+fun main() {
+    // 1. PAID 총 금액
+    println(orders.filter { it.status == "PAID" }.sumOf { it.amount })
+
+    // 2. 고객별 PAID 합계 (금액 내림차순)
+    //    Map 은 정렬이 안 되니 toList() 로 펴서 정렬하고, toMap() 이 LinkedHashMap 이라 순서가 유지된다.
+    println(
+        orders.filter { it.status == "PAID" }
+            .groupBy { it.customer }
+            .mapValues { (_, list) -> list.sumOf { it.amount } }
+            .toList()
+            .sortedByDescending { (_, total) -> total }
+            .toMap()
+    )
+
+    // 3. 상태별 건수 — groupBy 로 중간 리스트를 만들지 않고 groupingBy + eachCount
+    println(orders.groupingBy { it.status }.eachCount())
+
+    // 4. 3만원 이상 주문의 고객 이름
+    println(orders.filter { it.amount >= 30_000 }.map { it.customer })
+}
 ```

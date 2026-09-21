@@ -182,3 +182,76 @@ fun main() = runBlocking {
 3) flow catch: 스트림 중단
 3) 값: -1
 ```
+
+```text hint
+세 단계 모두 **"예외가 어디서 다시 던져지는가"** 를 먼저 정해야 `try` 자리가 정해집니다. `launch` 는 터지는 **즉시** 부모로 올라가서 `try` 로 잡을 기회조차 없고, `async` 는 예외를 `Deferred` 에 담아뒀다가 `await()` 하는 **그 줄에서** 다시 던집니다. Flow 는 또 달라서 `try` 가 아니라 전용 연산자를 씁니다.
+---
+쓸 도구는 import 에 다 있습니다. 1번은 `supervisorScope` + `async` + `await()`, 2번은 `CoroutineExceptionHandler` + `launch(handler)` + `delay`, 3번은 `flow { }` + `catch` + `collect`. `async<Int> { throw ... }` 처럼 **타입 인자를 명시**해야 컴파일러가 반환 타입을 정할 수 있습니다.
+---
+2번이 핵심입니다. `CoroutineExceptionHandler` 는 **`launch` 에만**, 그것도 **루트 코루틴에만** 동작합니다 (`async` 의 예외는 `Deferred` 가 들고 있어서 핸들러까지 안 갑니다). 예외적으로 `supervisorScope` 의 **직계 자식은 루트 취급**이라 거기 붙인 핸들러는 동작하고, supervisor라서 형제 `launch` 는 죽지 않고 완주합니다. 3번의 `catch` 는 **자기보다 위(업스트림)의 예외만** 잡고, 그 안에서 폴백 값을 `emit` 할 수 있습니다 — 그래서 `-1` 이 `collect` 까지 내려갑니다.
+---
+뼈대는 이렇습니다. 빈칸만 채우면 돼요.
+
+`step1`: `supervisorScope { val d = async<Int> { throw ___ }; try { d.await() } catch (e: IllegalStateException) { println("1) await 에서 잡음: ${e.message}") } }`
+
+`step2`: `val handler = CoroutineExceptionHandler { _, e -> ___ }` 를 만든 뒤 `supervisorScope { launch(handler) { throw ___ }; launch { delay(100); ___ } }`
+
+`step3`: `flow { emit(1); emit(2); throw ___ }.catch { e -> println("3) flow catch: ${e.message}"); emit(___) }.collect { ___ }`
+```
+
+```kotlin solution
+import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.supervisorScope
+
+// async 는 예외를 Deferred 에 담아두므로 await() 하는 지점에서 다시 던져진다.
+// supervisorScope 라서 그 예외가 부모까지 올라가지 않고 여기서 끝난다.
+suspend fun step1() {
+    supervisorScope {
+        val deferred = async<Int> { throw IllegalStateException("재고 부족") }
+        try {
+            deferred.await()
+        } catch (e: IllegalStateException) {
+            println("1) await 에서 잡음: ${e.message}")
+        }
+    }
+}
+
+// CoroutineExceptionHandler 는 launch 에만, 그것도 루트 코루틴에만 붙는다.
+// supervisorScope 의 직계 자식은 루트 취급이라 여기서는 동작하고, 형제는 죽지 않는다.
+suspend fun step2() {
+    val handler = CoroutineExceptionHandler { _, e -> println("2) 핸들러: ${e.message}") }
+    supervisorScope {
+        launch(handler) { throw RuntimeException("결제 승인 실패") }
+        launch {
+            delay(100)
+            println("2) 형제는 살아남음")
+        }
+    }
+}
+
+// catch 는 자기보다 위(업스트림)의 예외만 잡는다. 그 안에서 폴백 값을 emit 할 수 있다.
+suspend fun step3() {
+    flow {
+        emit(1)
+        emit(2)
+        throw IllegalStateException("스트림 중단")
+    }
+        .catch { e ->
+            println("3) flow catch: ${e.message}")
+            emit(-1)
+        }
+        .collect { println("3) 값: $it") }
+}
+
+fun main() = runBlocking {
+    step1()
+    step2()
+    step3()
+}
+```

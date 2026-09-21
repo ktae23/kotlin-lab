@@ -166,8 +166,6 @@ data class MemberResponse(val id: Long, val name: String, val email: String) {  
    - 둘 다 id가 있으면 id끼리 비교
    - `hashCode()`는 **id를 쓰면 안 됩니다.** id는 저장 시점에 `null` → 값으로 바뀌므로, 해시가 변하면 `HashSet`이 깨집니다. **상수**를 반환하세요.
 
-힌트: 엘비스 연산자로 early return (`val myId = id ?: return false`).
-
 ```kotlin starter
 // 잘못된 방식 — 엔티티를 data class 로 만든 경우 (수정하지 마세요)
 data class BadMember(
@@ -224,4 +222,73 @@ fun main() {
 [good] 같은 id 다른 인스턴스 contains: true
 [good] 미영속 둘 ==: false
 [good] 미영속 자기 자신 ==: true
+```
+
+```text hint
+JPA 엔티티의 동등성 기준은 **식별자 하나**입니다. 이름이 바뀌어도 id 가 1 이면 같은 행이고, LAZY 프록시처럼 필드가 텅 비어 있어도 id 가 1 이면 같은 행이에요. 그런데 `hashCode` 에는 제약이 하나 더 붙습니다 — `id` 는 저장 전 `null` 이었다가 INSERT 후 값으로 **바뀌죠.** `HashSet` 이 객체를 넣을 때의 해시로 버킷을 정한다는 걸 떠올려 보세요. id 로 해시를 만들면 저장 직후 무슨 일이 벌어질까요?
+---
+`equals` 는 관문 네 개입니다 — 동일 인스턴스(`this === other`), 타입 검사(`other !is GoodMember`), 미영속 차단, 그리고 id 비교. 세 번째 관문은 엘비스로 한 줄에 끝납니다: `val myId = id ?: return false`. `hashCode` 는 인스턴스 상태와 무관한 상수여야 하니 `javaClass.hashCode()` 를 쓰세요 (레슨 본문 Java 예제의 `getClass().hashCode()` 와 같은 것입니다).
+---
+순서가 중요합니다. `this === other` 가 **맨 앞**에 와야 `new1 == new1` — id 가 null 인 자기 자신 — 이 `true` 가 돼요. 그다음 타입 검사, 그다음 미영속 차단입니다. `val myId = id ?: return false` 는 **내** id 만 보지만, 상대 id 가 null 인 경우도 `myId == other.id` 에서 자연히 false 가 되니 검사는 한 번으로 충분합니다. `hashCode` 가 상수라는 건 **모든 엔티티가 한 버킷에 들어간다**는 뜻이고, 그래서 저장 후 id 가 채워져도 버킷이 움직이지 않습니다 — 버킷 안에서의 구분은 `equals` 가 맡아요. 해시 분산을 포기하고 **정확성**을 사는, 의도된 거래입니다.
+---
+뼈대는 이렇습니다. 빈칸 네 개만 채우면 돼요.
+
+`override fun equals(other: Any?): Boolean { if (this === ___) return true; if (other !is ___) return false; val myId = id ?: return ___; return myId == other.___ }`
+
+`override fun hashCode(): Int = ___`
+```
+
+```kotlin solution
+// 잘못된 방식 — 엔티티를 data class 로 만든 경우 (수정하지 마세요)
+data class BadMember(
+    var id: Long? = null,
+    var name: String,
+)
+
+// 올바른 방식 — id 기반 동등성
+class GoodMember(
+    var id: Long? = null,
+    var name: String,
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true          // 같은 인스턴스면 id 가 없어도 같다
+        if (other !is GoodMember) return false
+        val myId = id ?: return false            // 미영속(transient) 끼리는 절대 같지 않다
+        return myId == other.id                  // 비교 기준은 오직 식별자
+    }
+
+    // id 는 저장 시점에 null -> 값으로 바뀐다. 해시가 따라 변하면 HashSet 의 버킷이 어긋나므로
+    // 클래스 단위 상수를 쓴다. (동일 해시 + equals 로 구분 — 컬렉션 규약상 안전)
+    override fun hashCode(): Int = javaClass.hashCode()
+}
+
+fun main() {
+    // 1) data class 엔티티: 영속 상태에서 필드를 바꾸면 해시가 달라진다
+    val bad = BadMember(id = 1L, name = "박경태")
+    val badSet = hashSetOf(bad)
+    bad.name = "박경태(수정)"
+    println("[bad] 필드 변경 후 contains: ${badSet.contains(bad)}")
+
+    // 2) data class 엔티티: copy() 가 식별자까지 복제한다
+    val badCopy = bad.copy()
+    println("[bad] copy 된 id: ${badCopy.id}")
+    println("[bad] 원본 == 복사본: ${bad == badCopy}")
+
+    // 3) id 기반 엔티티: 필드를 바꿔도 컬렉션에서 찾을 수 있다
+    val good = GoodMember(id = 1L, name = "박경태")
+    val goodSet = hashSetOf(good)
+    good.name = "박경태(수정)"
+    println("[good] 필드 변경 후 contains: ${goodSet.contains(good)}")
+
+    // 4) 같은 id 면 다른 인스턴스여도 같은 엔티티 (프록시가 이렇게 들어온다)
+    val proxyLike = GoodMember(id = 1L, name = "아직 로딩 안 된 값")
+    println("[good] 같은 id 다른 인스턴스 ==: ${good == proxyLike}")
+    println("[good] 같은 id 다른 인스턴스 contains: ${goodSet.contains(proxyLike)}")
+
+    // 5) 아직 저장 안 된(id == null) 엔티티끼리는 절대 같지 않다
+    val new1 = GoodMember(name = "신규A")
+    val new2 = GoodMember(name = "신규B")
+    println("[good] 미영속 둘 ==: ${new1 == new2}")
+    println("[good] 미영속 자기 자신 ==: ${new1 == new1}")
+}
 ```

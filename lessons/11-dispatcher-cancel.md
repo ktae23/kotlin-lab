@@ -174,3 +174,47 @@ fun main() = runBlocking {
 수집 결과: null
 전체 글자수: 6
 ```
+
+```text hint
+취소는 **협조적**입니다. `delay` 는 알아서 취소를 확인해 주지만, 여기서 진짜 문제는 그다음이에요. 코루틴이 이미 취소된 상태에서 `finally` 에 들어가면, 그 안의 `delay(50)` 은 **정리를 시작하기도 전에 그 자리에서 터집니다.** 취소된 코루틴에서는 `suspend` 호출이 즉시 예외가 되니까요.
+---
+도구는 세 개입니다. 취소 확인은 `ensureActive()`, 정리 구간을 취소로부터 지키는 건 `withContext(NonCancellable)`, 스레드 전환은 `withContext(Dispatchers.Default)`. 합계는 `sumOf { }` 한 줄이면 됩니다.
+---
+`ensureActive()` 를 맨몸으로 쓸 수 있는 건 `CoroutineScope` 리시버가 있을 때뿐입니다. `collectPages` 는 리시버 없는 평범한 `suspend` 함수라서, **컨텍스트를 직접 꺼내 붙여야 해요** — `currentCoroutineContext().ensureActive()`. 구조는 `for` 순회 전체를 `try` 로 감싸고 `finally` 를 다는 형태입니다. 취소는 예외로 전파되므로 `finally` 는 타임아웃 경로에서도 반드시 실행되고, 그 안을 `NonCancellable` 로 감싸야만 `delay(50)` 과 로그가 살아남습니다. `done` 은 `try` 바깥에 선언돼 있으니 `finally` 에서도 그대로 보입니다.
+---
+뼈대는 이렇습니다. `try { for (page in pages) { delay(200); currentCoroutineContext().___(); done += page; println("수집: $page") } } finally { withContext(___) { delay(50); println("정리: ${done.size}건 커밋") } }`, 그리고 `totalSize` 는 `withContext(Dispatchers.Default) { pages.___ { it.length } }` 입니다.
+```
+
+```kotlin solution
+import kotlinx.coroutines.*
+
+suspend fun collectPages(pages: List<String>): List<String> {
+    val done = mutableListOf<String>()
+    try {
+        for (page in pages) {
+            delay(200)
+            // 스코프 리시버가 없는 suspend 함수라 currentCoroutineContext() 를 거쳐야 한다.
+            currentCoroutineContext().ensureActive()
+            done += page
+            println("수집: $page")
+        }
+    } finally {
+        // 이미 취소된 코루틴에서는 suspend 호출이 즉시 터진다 → NonCancellable 로 감싼다.
+        withContext(NonCancellable) {
+            delay(50)
+            println("정리: ${done.size}건 커밋")
+        }
+    }
+    return done
+}
+
+suspend fun totalSize(pages: List<String>): Int = withContext(Dispatchers.Default) {
+    pages.sumOf { it.length }
+}
+
+fun main() = runBlocking {
+    val collected = withTimeoutOrNull(500) { collectPages(listOf("p1", "p2", "p3", "p4")) }
+    println("수집 결과: $collected")
+    println("전체 글자수: ${totalSize(listOf("p1", "p2", "p3"))}")
+}
+```

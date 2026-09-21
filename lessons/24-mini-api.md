@@ -276,3 +276,134 @@ fun main() = runBlocking {
 [404] 없음: user id=99
 [500] 실패: 포인트 서비스 장애
 ```
+
+```text hint
+경로가 세 개입니다. 정상(id=1), 사용자 없음(id=99), 그리고 **부분 실패**(id=3 — 사용자와 주문은 멀쩡한데 포인트만 터짐). 앞의 둘은 쉽습니다. 어려운 건 셋째고, 질문은 하나예요 — **`async` 자식이 던진 예외는 정확히 어디서 튀어나오는가?** `await()` 줄일 것 같지만 아닙니다. 구조적 동시성에서 "자식의 실패는 부모의 실패"이므로, 예외는 **스코프 경계에서 다시 던져집니다.** 그럼 잡는 자리도 경계 바깥이어야겠죠.
+---
+도구는 이미 배운 것들입니다. 결과 타입은 `sealed interface ApiResult<out T>` 에 실패 쪽만 `ApiResult<Nothing>`, 등급 변환과 `render` 는 `when`(단 `render` 는 `else` 없이), 매핑의 "없으면 없음"은 `firstOrNull()?.title ?: "없음"`, 병렬은 `async { }` 둘 + `await()`, 그리고 사용자 없음의 조기 이탈은 `?: return@coroutineScope` 입니다. `error("...")` 가 던지는 게 `IllegalStateException` 이라는 것도 알아두세요.
+---
+`summarize` 의 형태가 이 과제의 전부입니다. `try` 를 `coroutineScope` **안쪽**에 두면 이렇게 됩니다 — 포인트 조회가 터지면 형제 `async` 가 취소되고, 예외는 `try` 를 통과해 빠져나간 뒤 **스코프 경계에서 다시 던져지므로** `catch` 가 이미 지나가 버린 상태입니다. 결과는 `Failure` 가 아니라 예외가 `main` 까지 올라가 버리는 것. 그래서 `try` 가 **바깥**이어야 합니다. 조기 이탈은 `?: return@coroutineScope ApiResult.NotFound(...)` — 스코프 람다에서 값을 내는 문법이고, 이 자리의 `ApiResult<Nothing>` 이 `ApiResult<UserSummary>` 로 받아지는 건 `out T` 공변성 덕분입니다. `render` 의 `when` 은 `else` 를 쓰지 마세요. 세 분기를 다 적으면 컴파일러가 완전성을 확인해 주고, 나중에 케이스가 늘면 **그때 컴파일 에러로** 알려줍니다.
+---
+뼈대는 이렇습니다. `try` 와 `coroutineScope` 의 **순서**를 그대로 지키세요.
+
+`suspend fun summarize(id: Long): ApiResult<UserSummary> = try { coroutineScope { ... } } catch (e: ___) { ApiResult.Failure(e.message ?: "unknown") }`
+
+`coroutineScope` 안쪽은 네 줄입니다 — `val user = users.findById(id) ?: return@___ ApiResult.NotFound("user id=$id")`, `val orderJob = ___ { orders.findByUserId(id) }`, `val pointJob = ___ { points.findByUserId(id) }`, `ApiResult.Ok(user.toSummary(orderJob.___(), pointJob.___()))`
+
+`fun render(result: ApiResult<UserSummary>): String = when (result) { is ApiResult.Ok -> "[200] ${result.___}"; is ApiResult.NotFound -> "[404] 없음: ${result.___}"; is ApiResult.Failure -> "[500] 실패: ${result.___}" }`
+```
+
+```kotlin solution
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
+
+// ── 1. 영속 계층 모델 (엔티티 흉내 — data class 가 아니다) ──
+class UserEntity(val id: Long, val name: String, val gradeCode: Int)
+class OrderEntity(val id: Long, val userId: Long, val title: String)
+
+// ── 2. sealed 결과 타입 ─────────────────────────────
+// out T + Nothing 조합: 실패 타입 하나가 모든 ApiResult<T> 자리에 들어간다.
+sealed interface ApiResult<out T> {
+    data class Ok<T>(val value: T) : ApiResult<T>
+    data class NotFound(val what: String) : ApiResult<Nothing>
+    data class Failure(val reason: String) : ApiResult<Nothing>
+}
+
+// ── 3. DTO (표현 계층 모델) ─────────────────────────
+data class UserSummary(
+    val userId: Long,
+    val name: String,
+    val grade: String,
+    val orderCount: Int,
+    val recentOrder: String,
+    val point: Int,
+)
+
+// ── 4. 확장 함수로 매핑 ─────────────────────────────
+fun Int.toGrade(): String = when (this) {
+    2 -> "GOLD"
+    1 -> "SILVER"
+    else -> "BRONZE"
+}
+
+// 엔티티는 DTO 를 모른다 — 의존 방향이 한쪽이다.
+fun UserEntity.toSummary(orders: List<OrderEntity>, point: Int): UserSummary = UserSummary(
+    userId = id,
+    name = name,
+    grade = gradeCode.toGrade(),
+    orderCount = orders.size,
+    recentOrder = orders.firstOrNull()?.title ?: "없음",
+    point = point,
+)
+
+// ── 5. Repository 계층 (수정하지 마세요) ────────────
+class UserRepository {
+    private val rows = listOf(
+        UserEntity(1, "이서준", 2),
+        UserEntity(3, "김하늘", 0),
+    )
+
+    suspend fun findById(id: Long): UserEntity? {
+        delay(30)
+        return rows.firstOrNull { it.id == id }
+    }
+}
+
+class OrderRepository {
+    suspend fun findByUserId(userId: Long): List<OrderEntity> {
+        delay(80)
+        return listOf(
+            OrderEntity(101, userId, "맥북 프로 16"),
+            OrderEntity(102, userId, "기계식 키보드"),
+        )
+    }
+}
+
+class PointRepository {
+    suspend fun findByUserId(userId: Long): Int {
+        delay(50)
+        if (userId == 3L) error("포인트 서비스 장애")
+        return 12_000
+    }
+}
+
+// ── 6. Service 계층 ─────────────────────────────────
+class UserSummaryService(
+    private val users: UserRepository,
+    private val orders: OrderRepository,
+    private val points: PointRepository,
+) {
+    // try 가 coroutineScope 바깥이다. 자식의 실패는 스코프 경계에서 다시 던져지므로
+    // await() 주위에서 잡으면 놓친다.
+    suspend fun summarize(id: Long): ApiResult<UserSummary> = try {
+        coroutineScope {
+            // 사용자 조회는 병렬이 아니다 — 없으면 나머지를 할 이유가 없다.
+            val user = users.findById(id)
+                ?: return@coroutineScope ApiResult.NotFound("user id=$id")
+            val orderJob = async { orders.findByUserId(id) }   // 주문과 포인트는
+            val pointJob = async { points.findByUserId(id) }   // 서로 독립 → 병렬
+            ApiResult.Ok(user.toSummary(orderJob.await(), pointJob.await()))
+        }
+    } catch (e: IllegalStateException) {
+        ApiResult.Failure(e.message ?: "unknown")
+    }
+}
+
+// ── 7. Controller 계층 ──────────────────────────────
+// else 가 없다. 나중에 결과 타입이 늘면 이 when 이 컴파일 에러로 알려준다.
+fun render(result: ApiResult<UserSummary>): String = when (result) {
+    is ApiResult.Ok -> "[200] ${result.value}"
+    is ApiResult.NotFound -> "[404] 없음: ${result.what}"
+    is ApiResult.Failure -> "[500] 실패: ${result.reason}"
+}
+
+fun main() = runBlocking {
+    val service = UserSummaryService(UserRepository(), OrderRepository(), PointRepository())
+
+    listOf(1L, 99L, 3L).forEach { id ->
+        println(render(service.summarize(id)))
+    }
+}
+```

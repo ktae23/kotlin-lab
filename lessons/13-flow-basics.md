@@ -164,3 +164,43 @@ flow 생성 — 아직 아무것도 실행 안 됨
 2차 수집: ORD-3
 [KIM, LEE]
 ```
+
+```text hint
+`flow { }` 는 **레시피지 음식이 아닙니다.** 그러니 `orderIds()` 를 호출하는 것만으로는 블록 안의 `println` 이 절대 찍히지 않아요. 기대 출력에 `[flow] 블록 시작` 이 **두 번** 있다는 걸 보세요. 그 두 번을 만들려고 따로 뭔가 할 필요는 없습니다 — 왜 저절로 두 번이 되는지가 이 연습의 전부입니다.
+---
+만드는 건 `flow { }` 와 그 안의 `emit()`, 소비하는 건 `collect { }` 입니다. 마지막 줄은 `asFlow()` → `map { }` → `toList()` 세 단계를 이으면 됩니다.
+---
+`[flow] 블록 시작` 은 `emit` 루프보다 **앞**, 블록 최상단에 둡니다. 콜드 스트림이라 `collect` 를 부를 때마다 블록이 **처음부터 다시 실행**되고, 그래서 1차·2차 수집 앞에 각각 한 번씩 저절로 찍히는 거예요. 같은 `orders` 변수를 두 번 `collect` 하면 됩니다. `flow { }` 안은 평범한 코드라 `for (i in 1..3)` 을 그냥 쓰면 되고, `collect` 와 `toList` 는 둘 다 `suspend` 종단 연산자라서 `runBlocking` 안에서만 호출됩니다.
+---
+뼈대는 이렇습니다. `fun orderIds(): Flow<String> = flow { println("[flow] 블록 시작"); for (i in 1..3) { delay(10); ___("ORD-$i") } }`, main 에서는 `orders.collect { println("1차 수집: $it") }` 를 문구만 바꿔 두 번, 그리고 `listOf("kim", "lee").asFlow().map { it.___() }.toList()`.
+```
+
+```kotlin solution
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.asFlow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.runBlocking
+
+// 콜드 스트림 — collect 할 때마다 이 블록이 처음부터 다시 실행된다.
+fun orderIds(): Flow<String> = flow {
+    println("[flow] 블록 시작")
+    for (i in 1..3) {
+        delay(10)
+        emit("ORD-$i")
+    }
+}
+
+fun main() = runBlocking {
+    val orders = orderIds()
+    println("flow 생성 — 아직 아무것도 실행 안 됨")
+
+    orders.collect { println("1차 수집: $it") }
+    orders.collect { println("2차 수집: $it") }
+
+    val names: List<String> = listOf("kim", "lee").asFlow().map { it.uppercase() }.toList()
+    println(names)
+}
+```

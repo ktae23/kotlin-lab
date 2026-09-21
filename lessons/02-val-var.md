@@ -100,8 +100,6 @@ const val MAX_RETRY = 3   // top-level 또는 object 안에서만
 
 아래 두 함수를 **`var`와 `mutableListOf`를 쓰지 않고** 다시 작성하세요. 출력은 동일해야 합니다.
 
-힌트: `when` 표현식, 그리고 컬렉션의 `filter`.
-
 ```kotlin starter
 fun grade(score: Int): String {
     var result = ""
@@ -130,4 +128,37 @@ fun main() {
 ```text expected
 [A, B, C, F]
 [95, 83, 71]
+```
+
+```text hint
+`var result`가 필요했던 이유는 **"선언 따로, 값 채우기 따로"** 였기 때문입니다. Kotlin에서 `if`/`when`은 문(statement)이 아니라 **표현식**이라 그 자체가 값을 내놓습니다. 두 번째 함수도 같은 눈으로 보세요 — "빈 리스트를 만들어 하나씩 채운다"는 절차가 아니라 **"원본에서 걸러낸 결과"라는 하나의 값**입니다.
+---
+쓸 도구는 두 개뿐입니다. 인자 없는 `when { }` 은 조건을 위에서부터 훑어 **처음 참이 된 가지의 값**을 돌려줍니다. 컬렉션의 `filter { }` 는 조건을 만족하는 원소만 담은 **새 `List`를 반환**합니다.
+---
+`when`이 값을 내놓으니 함수 본문을 블록(`{ ... return ... }`) 대신 **표현식 본문(`= when { ... }`)** 으로 쓸 수 있습니다. 가지는 위에서 아래로 검사되므로 `>= 90`, `>= 80`, `>= 70` 의 **순서 자체가 의미**를 갖고, 남는 경우는 `else`가 받습니다. `filter`는 이미 `List<Int>`를 반환하니 반환 타입을 바꿀 일도, `return`을 쓸 일도 없습니다.
+---
+뼈대는 이렇습니다.
+
+`grade` 는 `fun grade(score: Int): String = when { ___ }` 꼴이고, 중괄호 안은 `score >= 90 -> "A"` 같은 줄 네 개(마지막은 `else -> "F"`)입니다.
+
+`passed` 는 한 줄입니다 — `fun passed(scores: List<Int>): List<Int> = scores.___ { it >= 70 }`
+```
+
+```kotlin solution
+// if 로 채우던 var 를 when 표현식 하나로 대체한다 — 선언과 값이 한 자리에서 만난다.
+fun grade(score: Int): String = when {
+    score >= 90 -> "A"
+    score >= 80 -> "B"
+    score >= 70 -> "C"
+    else -> "F"
+}
+
+// mutableListOf + for + add 는 "걸러낸 결과"라는 하나의 값으로 바꿀 수 있다.
+fun passed(scores: List<Int>): List<Int> = scores.filter { it >= 70 }
+
+fun main() {
+    val scores = listOf(95, 83, 71, 40)
+    println(scores.map { grade(it) })
+    println(passed(scores))
+}
 ```

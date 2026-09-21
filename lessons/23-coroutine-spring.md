@@ -221,3 +221,83 @@ fun main() = runBlocking {
 [취소] 정리: 커넥션 반납
 [취소] 요청 종료
 ```
+
+```text hint
+시간을 재지 않고도 순차와 병렬을 구분할 수 있습니다. **완료 출력이 나오는 순서**가 증거예요. 순차라면 앞의 것이 끝나야 다음이 시작하니 **호출 순서 그대로** 찍히고, 병렬이라면 셋이 같이 출발했으니 **짧게 걸리는 것부터** 찍힙니다. 그래서 "완료" 출력을 어디에 두느냐가 중요합니다 — 세 호출이 모두 끝난 **뒤**에 한꺼번에 찍으면 아무것도 증명하지 못해요.
+---
+쓸 도구는 셋입니다. 블로킹을 옮기는 `withContext(Dispatchers.IO) { }`, 동시에 띄우는 `async { }`, 선언 순서대로 모으는 `awaitAll(...)`. 취소 쪽은 `try` / `finally` 만 있으면 되고요. `withContext` 는 **블록의 마지막 값을 그대로 반환하는 suspend 함수**라는 점을 기억하세요.
+---
+`fetch` 는 `withContext` 의 결과를 변수로 받고, 그 **다음 줄에서 출력한 뒤 반환**합니다. 출력이 각 호출의 완료 직후에 붙기 때문에 순차/병렬 차이가 드러나는 거예요. `async` 는 **호출하는 즉시 시작**합니다 — 세 개를 연달아 띄우면 `await` 을 하기 전부터 이미 같이 돌고 있고, 그래서 리뷰(50) → 배송(100) → 결제(150) 순으로 완료가 찍힙니다. 반면 `awaitAll(a, b, c)` 가 돌려주는 리스트는 완료 순서가 아니라 **인자를 쓴 순서**라, 결과 리스트는 순차·병렬이 똑같습니다. 취소 쪽은 `delay` 가 **취소 지점**이라는 게 핵심입니다. `cancelAndJoin` 이 걸리면 `delay` 가 `CancellationException` 을 던지며 풀리고, 그 예외가 `try` 를 빠져나가는 길에 `finally` 가 실행됩니다. `join` 이 그 정리까지 기다려 주기 때문에 `[취소] 요청 종료` 보다 먼저 찍히는 거예요.
+---
+뼈대는 이렇습니다. 빈칸만 채우면 됩니다.
+
+`suspend fun fetch(name: String, millis: Long, tag: String): String { val result = ___ { blockingFetch(name, millis) }; println("[$tag] 완료: $result"); return ___ }`
+
+`val payment = ___ { fetch("결제", 150, "병렬") }` 를 배송·리뷰까지 세 줄 쓰고, 마지막 줄은 `___(payment, delivery, review)`
+
+`val job = launch(Dispatchers.IO) { ___ { delay(10_000); println("[취소] 여기는 절대 출력되지 않는다") } ___ { println("[취소] 정리: 커넥션 반납") } }`
+```
+
+```kotlin solution
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+
+// 블로킹 API (JDBC / RestTemplate 이라고 생각하세요) — 수정하지 마세요
+fun blockingFetch(name: String, millis: Long): String {
+    Thread.sleep(millis)
+    return name
+}
+
+// 블로킹 호출을 코루틴에서 안전하게 감싸기 (main-safety)
+// 호출자가 어느 디스패처에 있든, 블로킹은 이 함수가 스스로 IO 로 옮긴다.
+suspend fun fetch(name: String, millis: Long, tag: String): String {
+    val result = withContext(Dispatchers.IO) { blockingFetch(name, millis) }
+    println("[$tag] 완료: $result")
+    return result
+}
+
+suspend fun sequential(): List<String> {
+    println("[순차] 시작")
+    val a = fetch("결제", 150, "순차")
+    val b = fetch("배송", 100, "순차")
+    val c = fetch("리뷰", 50, "순차")
+    return listOf(a, b, c)
+}
+
+suspend fun parallel(): List<String> = coroutineScope {
+    println("[병렬] 시작")
+    // async 는 호출하는 즉시 시작한다. 그래서 완료 출력은 짧은 것부터 나온다.
+    val payment = async { fetch("결제", 150, "병렬") }
+    val delivery = async { fetch("배송", 100, "병렬") }
+    val review = async { fetch("리뷰", 50, "병렬") }
+    // 반면 awaitAll 의 결과는 완료 순서가 아니라 인자 선언 순서다.
+    awaitAll(payment, delivery, review)
+}
+
+fun main() = runBlocking {
+    println("결과=${sequential()}")
+    println("결과=${parallel()}")
+
+    // 구조적 동시성: 부모가 취소되면 자식의 finally 가 반드시 돈다
+    println("[취소] 시작")
+    val job = launch(Dispatchers.IO) {
+        try {
+            delay(10_000)
+            println("[취소] 여기는 절대 출력되지 않는다")
+        } finally {
+            // delay 가 CancellationException 을 던지며 풀려도 finally 는 실행된다.
+            println("[취소] 정리: 커넥션 반납")
+        }
+    }
+    delay(100)
+    job.cancelAndJoin()   // join 이 finally 완료까지 기다린다
+    println("[취소] 요청 종료")
+}
+```

@@ -91,12 +91,38 @@ fun main() {
 ```text expected
 기대 출력
 ```
+
+```text hint
+1단계 — 개념만 짚어준다
+---
+2단계 — 어떤 도구를 쓰는지
+---
+3단계 — 뼈대에 빈칸 `___` 남기기
+```
+
+```kotlin solution
+fun main() {
+    // 완전히 동작하는 전체 풀이
+}
+```
 ````
 
 - `# ` 제목이 사이드바 항목
 - `## 연습` 위쪽이 이론 패널, 아래쪽이 연습 패널
-- ` ```kotlin starter ` 와 ` ```text expected ` 펜스는 **이름까지 정확히** 맞아야 파싱됩니다
-- 연습 코드는 **stdlib + kotlinx-coroutines 만** 쓸 수 있습니다 (Spring/JPA import 불가)
+- 펜스 정보 문자열은 **이름까지 정확히** 맞아야 파싱됩니다 — ` ```kotlin starter `, ` ```text expected `, ` ```text hint `, ` ```kotlin solution `
+- `hint` 와 `solution` 은 **선택**입니다. 없으면 버튼이 비활성화될 뿐 나머지는 정상 동작합니다
+- 힌트는 `---` 단독 줄로 나누면 **한 단계씩** 공개됩니다
+- 연습·정답 코드는 **stdlib + kotlinx-coroutines 만** 쓸 수 있습니다 (Spring/JPA import 불가)
+
+검증: `node scripts/validate-lessons.mjs` — 형식과 힌트·정답 커버리지를 함께 보고합니다.
+
+### 힌트 / 정답 버튼
+
+연습 패널 상단에 있습니다.
+
+- **힌트** — 누를 때마다 한 단계씩 공개 (`힌트 (4)` → `힌트 더 보기 (2/4)` → …)
+- **정답** — 실수로 여는 걸 막기 위해 **두 번** 눌러야 열립니다. 열린 뒤 `에디터에 넣기` 로 바로 적용 가능
+- 레슨을 바꾸면 초기화됩니다
 
 ---
 

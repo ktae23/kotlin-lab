@@ -171,3 +171,55 @@ shipping 완료 (300ms)
 모든 하위 작업 완료
 실패: 재고 부족
 ```
+
+```text hint
+`launch` 는 **작업을 던지고 즉시 다음 줄로 넘어갑니다.** 그러면 누가 기다려 주나요? 여기서 "스코프가 자식을 소유한다"는 말이 실제 코드로 어떻게 나타나는지 생각해 보세요. 세 작업을 나란히 던져도 **함수가 반환되는 시점은 셋이 다 끝난 뒤**여야 합니다.
+---
+쓸 도구는 두 개뿐입니다. `coroutineScope { }` 와 그 안의 `launch { }`. `coroutineScope` 는 `suspend` 함수라서 **블로킹하지 않고 중단만 하면서** 자식을 전부 기다립니다. `riskyAll` 에서 문자열을 돌려줘야 하는데, `coroutineScope` 는 **블록의 마지막 값을 그대로 반환**한다는 점도 같이 보세요.
+---
+`processAll` 은 `launch` 세 줄을 나란히 쓰면 끝입니다. 셋이 동시에 시작하고 `coroutineScope` 가 가장 긴 300ms 까지 기다리니 총 300ms 예요. `riskyAll` 은 **`try` 를 어디에 두느냐**가 전부입니다. 자식의 예외는 `launch` 안에서 잡히는 게 아니라 **부모로 전파돼서 `coroutineScope` 호출 지점에서 다시 던져집니다.** 그러니 `try` 는 `coroutineScope` **바깥**을 감싸야 해요. 이때 형제도 함께 취소되므로 500ms 짜리 `println` 은 실행될 기회가 없습니다.
+---
+뼈대는 이렇습니다. `processAll` 은 `coroutineScope { launch { handle("inventory", 100) } ... }` 를 세 번, `riskyAll` 은 `try { coroutineScope { launch { delay(50); throw ___ }; launch { ___ }; "성공" } } catch (e: IllegalStateException) { "실패: ${___}" }` 형태입니다.
+```
+
+```kotlin solution
+import kotlinx.coroutines.*
+
+suspend fun handle(name: String, ms: Long) {
+    delay(ms)
+    println("$name 완료 (${ms}ms)")
+}
+
+// coroutineScope 는 세 자식이 전부 끝나야 반환한다. 그래서 "완료" 로그는 항상 마지막.
+suspend fun processAll() {
+    coroutineScope {
+        launch { handle("inventory", 100) }
+        launch { handle("payment", 200) }
+        launch { handle("shipping", 300) }
+    }
+}
+
+// 자식 하나가 실패하면 형제가 취소되고 예외가 coroutineScope 밖으로 나온다 → try/catch 로 잡힌다.
+suspend fun riskyAll(): String = try {
+    coroutineScope {
+        launch {
+            delay(50)
+            throw IllegalStateException("재고 부족")
+        }
+        launch {
+            delay(500)
+            println("이 줄은 출력되지 않는다")
+        }
+        "성공"
+    }
+} catch (e: IllegalStateException) {
+    "실패: ${e.message}"
+}
+
+fun main() = runBlocking {
+    println("주문 처리 시작")
+    processAll()
+    println("모든 하위 작업 완료")
+    println(riskyAll())
+}
+```

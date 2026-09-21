@@ -137,3 +137,39 @@ Member(name=박경태, email=kt@example.com, role=ADMIN, active=true)
 박경태 / kt@example.com
 true
 ```
+
+```text hint
+Lombok 애노테이션 다섯 개가 하던 일을 **키워드 하나**가 대신합니다. 다만 그 키워드가 만들어 주는 것들은 전부 **주 생성자에 선언된 프로퍼티만** 기준으로 합니다 — 네 필드가 모두 주 생성자 안에 들어가야 `toString`도, `equals`도, 구조 분해도 기대한 대로 나옵니다. `@Builder`의 나머지 절반(일부만 지정하기)은 Kotlin에서 애노테이션이 아니라 **파라미터 문법**으로 해결된다는 것도 같이 떠올려 보세요.
+---
+필요한 건 셋입니다. `data class` 선언, 주 생성자 프로퍼티 `val`, 그리고 **파라미터 기본값**(`val role: String = "USER"` 같은 꼴). `copy()`, `component1()`, `equals()`는 손으로 쓰지 않습니다 — `data`가 만들어 줍니다.
+---
+expected 출력을 거꾸로 읽으면 그게 곧 스펙입니다. `Member(name=..., email=..., role=..., active=...)` 의 **나열 순서가 주 생성자 선언 순서**이고, `val (name, email) = admin` 이 그 순서대로 풀리는 것도 `component1`/`component2`가 1·2번 프로퍼티이기 때문입니다. 마지막 줄이 `true`인 이유는 `data`가 **모든 주 생성자 프로퍼티를 비교하는** `equals`를 만들기 때문 — 뒤 두 개를 생략한 쪽도 기본값으로 채워져 같은 값이 됩니다. 그래서 기본값은 **뒤쪽 두 개에만** 붙습니다.
+---
+뼈대는 이렇습니다. 빈칸 두 개만 채우면 돼요.
+
+`data class Member(val name: String, val email: String, val role: String = ___, val active: Boolean = ___)`
+```
+
+```kotlin solution
+// data 가 equals/hashCode/toString/copy/componentN 를 주 생성자 프로퍼티 기준으로 만들어 준다.
+// 기본값은 생략 가능한 뒤쪽 두 개에만 — 빌더 없이 named argument 로 필요한 것만 지정한다.
+data class Member(
+    val name: String,
+    val email: String,
+    val role: String = "USER",
+    val active: Boolean = true,
+)
+
+fun main() {
+    val a = Member(name = "박경태", email = "kt@example.com")
+    println(a)
+
+    val admin = a.copy(role = "ADMIN")
+    println(admin)
+
+    val (name, email) = admin
+    println("$name / $email")
+
+    println(a == Member("박경태", "kt@example.com"))
+}
+```

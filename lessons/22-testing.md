@@ -234,3 +234,96 @@ FAIL  일부러 실패시키는 테스트 — 실패 출력 형식 확인 — ex
 ----
 총 4개 · 성공 3 · 실패 1
 ```
+
+```text hint
+세 가지 모두 **라이브러리가 대신 해주던 일을 손으로 하는 것**입니다. Kotest의 테스트 이름은 마법이 아니라 그냥 **문자열 인자**고, `shouldBe` 는 **다르면 예외를 던지는 함수**일 뿐이며, MockK의 `coVerify` 가 볼 수 있는 이유는 스파이가 **호출을 기록해 뒀기 때문**입니다. "그럼 기록은 누가 하지?"를 먼저 생각해 보세요.
+---
+`test` 의 `block` 은 `suspend () -> Unit` 인데 `test` 자신은 `suspend` 가 아닙니다. 일반 함수에서 suspend 블록을 실행하는 경계가 `runBlocking` 이에요 (실무라면 이 자리가 `runTest` 입니다). 실패는 `throw AssertionError(...)` 로 던지고, 받는 쪽은 `try` / `catch` 로 잡습니다. 스파이는 `MutableList` 에 `+=` 로 쌓고, 조회는 `Map` 의 `rows[id]` — **없으면 null** 이라 반환 타입 `String?` 에 그대로 맞습니다.
+---
+`runBlocking` 을 `test` **안쪽**에 두세요. 그래야 테스트 하나가 독립된 코루틴에서 돌고, 실패해도 다음 테스트가 이어집니다. 그리고 **`catch (e: Exception)` 으로는 못 잡습니다** — `AssertionError` 는 `Exception` 이 아니라 `Error` 계열이라, 잡을 타입을 정확히 `AssertionError` 로 써야 해요. 출력은 집계(`passed++` / `failed++`) 뒤에 `println` 이고, 형식은 `"PASS  $name"` 처럼 **공백 두 칸**, 실패는 `"FAIL  $name — ${e.message}"` 입니다. `shouldBe` 가 `a shouldBe b` 로 읽히는 건 **파라미터 하나짜리 확장 함수에 `infix` 를 붙였기** 때문이고, 스파이는 **기록이 먼저, 반환이 나중**입니다 — 실패한 조회도 호출은 호출이니까요.
+---
+뼈대는 이렇습니다. 빈칸만 채우면 됩니다.
+
+`fun test(name: String, block: suspend () -> Unit) { runBlocking { try { ___(); passed++; println("PASS  $name") } catch (e: ___) { failed++; println("FAIL  $name — ${e.___}") } } }`
+
+`infix fun <T> T.shouldBe(expected: T) { if (this ___ expected) throw AssertionError("expected <$expected> but was <$this>") }`
+
+`override suspend fun findName(id: Long): String? { calls ___ id; return ___ }`
+```
+
+```kotlin solution
+import kotlinx.coroutines.runBlocking
+
+// ── 1. 간이 테스트 러너 (Kotest 흉내) ───────────────
+class TestRunner {
+    private var passed = 0
+    private var failed = 0
+
+    // suspend 블록을 받으므로 경계에서 runBlocking 으로 한 번만 코루틴을 연다.
+    // (실무에서는 이 자리가 kotlinx-coroutines-test 의 runTest 다)
+    fun test(name: String, block: suspend () -> Unit) {
+        runBlocking {
+            try {
+                block()
+                passed++
+                println("PASS  $name")
+            } catch (e: AssertionError) {
+                failed++
+                println("FAIL  $name — ${e.message}")
+            }
+        }
+    }
+
+    fun report() {
+        println("----")
+        println("총 ${passed + failed}개 · 성공 $passed · 실패 $failed")
+    }
+}
+
+// ── 2. 간이 매처 (AssertJ 흉내) ─────────────────────
+// infix 라서 `a shouldBe b` 로 읽힌다. Kotest 매처도 정확히 이 구조다.
+infix fun <T> T.shouldBe(expected: T) {
+    if (this != expected) throw AssertionError("expected <$expected> but was <$this>")
+}
+
+// ── 3. 프로덕션 코드 (수정하지 마세요) ──────────────
+interface UserRepository {
+    suspend fun findName(id: Long): String?
+}
+
+class UserService(private val repo: UserRepository) {
+    suspend fun displayName(id: Long): String = repo.findName(id)?.uppercase() ?: "UNKNOWN"
+}
+
+// ── 4. 간이 스파이 (MockK 흉내) ─────────────────────
+class SpyUserRepository(private val rows: Map<Long, String>) : UserRepository {
+    val calls = mutableListOf<Long>()
+
+    // 스파이의 본질은 "호출 기록" 이다. 이 기록이 곧 coVerify 의 근거가 된다.
+    override suspend fun findName(id: Long): String? {
+        calls += id
+        return rows[id]
+    }
+}
+
+fun main() {
+    val runner = TestRunner()
+    val repo = SpyUserRepository(mapOf(1L to "seojun"))
+    val service = UserService(repo)
+
+    runner.test("존재하는 사용자는 이름을 대문자로 반환한다") {
+        service.displayName(1L) shouldBe "SEOJUN"
+    }
+    runner.test("없는 사용자는 UNKNOWN 을 반환한다") {
+        service.displayName(99L) shouldBe "UNKNOWN"
+    }
+    runner.test("리포지토리는 호출된 id 를 순서대로 기록한다") {
+        repo.calls shouldBe listOf(1L, 99L)
+    }
+    runner.test("일부러 실패시키는 테스트 — 실패 출력 형식 확인") {
+        service.displayName(1L) shouldBe "seojun"
+    }
+
+    runner.report()
+}
+```

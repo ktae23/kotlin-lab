@@ -105,8 +105,6 @@ val result = compute()
 
 **2. `Int?.orZero()`** — null이면 `0`, 아니면 그 값. **nullable 수신 객체**로 만들어 `?.` 없이 호출되게 하세요.
 
-힌트: `substringBefore`, `substringAfter`, `take(2)`, `repeat()`, 그리고 `contains("@")`.
-
 ```kotlin starter
 // TODO 1: String.masked()
 // TODO 2: Int?.orZero()
@@ -126,4 +124,39 @@ ky******@example.com
 ab@x.com
 se****
 5
+```
+
+```text hint
+`masked()`는 문자열을 **두 조각**으로 나눠서 보세요 — 가려야 할 앞부분(`@` 앞)과 그대로 둘 뒷부분(`@`부터 끝까지). `@`가 없는 `"secret"`은 별도 알고리즘이 아니라 **"뒷부분이 빈 문자열"인 같은 경우**일 뿐입니다. `orZero()`는 전혀 다른 질문이에요 — `val n: Int? = null` 인데 `n.orZero()`가 `?.` 없이 컴파일되려면, **수신 타입 자체가** 무엇이어야 할까요?
+---
+쓸 도구: `substringBefore("@")`, `substringAfter("@")`, `contains("@")`, 앞 두 글자만 남기는 `take(2)`, 별을 n개 만드는 `"*".repeat(n)`. `orZero()`는 엘비스 연산자 `?:` 하나로 끝납니다.
+---
+별의 개수는 `local.length - 2`인데, 로컬 파트가 두 글자 이하면 **음수가 되어 `repeat`이 예외를 던집니다.** `coerceAtLeast(0)`으로 바닥을 막으세요 — `"ab@x.com"`이 한 글자도 안 가려진 채 그대로 나오는 게 정확히 이 0개 케이스입니다. 그리고 `substringBefore`는 **구분자가 없으면 문자열 전체를 돌려주므로** `"secret"`도 분기 없이 같은 코드 경로를 탑니다. `orZero()`는 수신 타입을 `Int?`로 선언하면 함수 안의 `this`가 nullable이 되고, 그러면 `this ?: 0` 한 줄이면 됩니다.
+---
+뼈대는 이렇습니다.
+
+`masked()` 본문은 세 줄이에요. `val local = substringBefore("@")` 로 앞부분을 떼고, `val rest = if (contains("@")) "@" + substringAfter("@") else ""` 로 뒷부분을 만든 뒤, `return local.take(2) + "*".repeat(___) + rest` 의 빈칸만 채우면 됩니다.
+
+`orZero()` 는 `fun ___.orZero(): Int = this ?: 0`
+```
+
+```kotlin solution
+// @ 앞뒤로 쪼개면 "@ 없음" 은 뒤쪽이 빈 문자열인 같은 경우가 된다 — 분기가 하나로 줄어든다.
+fun String.masked(): String {
+    val local = substringBefore("@")
+    val rest = if (contains("@")) "@" + substringAfter("@") else ""
+    return local.take(2) + "*".repeat((local.length - 2).coerceAtLeast(0)) + rest
+}
+
+// 수신 타입을 Int? 로 잡아야 null 인 변수에서도 ?. 없이 호출된다.
+fun Int?.orZero(): Int = this ?: 0
+
+fun main() {
+    println("kyungtae@example.com".masked())
+    println("ab@x.com".masked())
+    println("secret".masked())
+
+    val n: Int? = null
+    println(n.orZero() + 5.orZero())
+}
 ```

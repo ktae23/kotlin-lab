@@ -158,7 +158,6 @@ Spring 없이 **생성자 주입과 설정 바인딩을 손으로** 만들어 �
    - `host` 가 없거나 비어 있으면 `init` 의 `require`가 던지게 두세요 (`source["host"] ?: ""`).
    - **`port` 키가 없으면 data class 의 기본값 `25`가 쓰여야 합니다.** 호출부에 `25`를 다시 적으면 안 됩니다. 인자를 아예 넘기지 않는 분기를 만드세요 (이름 있는 인자가 편합니다).
 2. `BeanContainer.get(type)` — 등록된 빈을 타입으로 찾아 반환하세요. 없으면 `error("bean 없음: ${type.name}")`.
-   힌트: `type.cast(bean)`
 
 `main`은 이미 **컨테이너에서 꺼낸 빈을 생성자에 넣어 다음 빈을 만드는** 흐름으로 짜여 있습니다. Spring이 기동할 때 하는 일이 정확히 이겁니다.
 
@@ -209,4 +208,71 @@ noreply@corp.io -> kim@corp.io via smtp.corp.io:587
 MailProperties(host=localhost, port=25, from=null)
 host 는 필수입니다
 bean 없음: java.lang.String
+```
+
+```text hint
+DI 컨테이너의 정체는 **`Class` 를 키로 쓰는 맵** 하나입니다. `register` 가 이미 그렇게 담고 있으니(`beans[bean.javaClass] = bean`), `get` 은 같은 키로 꺼내기만 하면 돼요. 바인딩 쪽은 다른 감각이 필요합니다 — Kotlin의 기본값은 **"인자를 넘기지 않았을 때"** 만 쓰이므로, "값이 없다"를 `null` 로 표현해서 넘기면 기본값은 영원히 안 쓰입니다.
+---
+`get` 은 맵 조회 뒤 `?: error("bean 없음: ${type.name}")` 로 없는 경우를 끊고, 반환은 `type.cast(bean)` 으로 합니다 (`as T` 는 제네릭이 지워져서 컴파일러가 경고를 냅니다). `bind` 는 `source["port"]` 가 `null` 인지로 **분기**하고, 호출할 때 `MailProperties(host = ..., from = ...)` 처럼 **이름 있는 인자**를 쓰면 원하는 파라미터만 골라 넘길 수 있습니다.
+---
+`bind` 의 핵심은 "`port` 를 안 넘기는 경로를 실제로 만드는 것"입니다. `MailProperties(host, source["port"]?.toInt() ?: 25, from)` 처럼 쓰고 싶어지지만 그러면 `25` 가 data class 와 호출부 **두 군데**에 적히고 언젠가 갈라집니다. `if (port == null) MailProperties(host = ..., from = ...)` 과 `else MailProperties(host = ..., port = ..., from = ...)` 두 갈래로 나누세요. `host` 는 `source["host"] ?: ""` 로 **그대로 넘겨서** data class 의 `init` 안 `require` 가 던지게 둬야 `host 는 필수입니다` 메시지가 나옵니다 — `bind` 에서 미리 검사하면 안 됩니다. `from` 은 없으면 `null` 이고 기본값도 `null` 이라 그냥 넘겨도 됩니다.
+---
+뼈대는 이렇습니다. 빈칸만 채우면 돼요.
+
+`get`: `val bean = beans[type] ?: error(___); return type.cast(bean)`
+
+`bind`: `val host = source["host"] ?: ""` / `val from = source["from"]` / `val port = source["port"]` 를 꺼낸 뒤 `return if (port == null) MailProperties(host = host, from = from) else MailProperties(host = host, port = ___, from = from)`
+```
+
+```kotlin solution
+data class MailProperties(
+    val host: String,
+    val port: Int = 25,
+    val from: String? = null,
+) {
+    init {
+        require(host.isNotBlank()) { "host 는 필수입니다" }
+    }
+}
+
+class MailSender(private val props: MailProperties) {
+    fun send(to: String): String =
+        "${props.from ?: "noreply@corp.io"} -> $to via ${props.host}:${props.port}"
+}
+
+class BeanContainer {
+    private val beans = mutableMapOf<Class<*>, Any>()
+
+    fun register(bean: Any) {
+        beans[bean.javaClass] = bean
+    }
+
+    // 컨테이너가 하는 일의 전부: 타입을 키로 찾아 그 타입으로 캐스팅해 돌려준다.
+    fun <T : Any> get(type: Class<T>): T {
+        val bean = beans[type] ?: error("bean 없음: ${type.name}")
+        return type.cast(bean)
+    }
+}
+
+// port 키가 없으면 인자를 아예 넘기지 않는다 = data class 의 기본값 25 가 쓰인다.
+// 호출부에 25 를 다시 적으면 기본값이 두 군데가 되고 언젠가 갈라진다.
+// host 는 빈 문자열 그대로 넘겨 init 의 require 가 던지게 둔다.
+fun bind(source: Map<String, String>): MailProperties {
+    val host = source["host"] ?: ""
+    val from = source["from"]
+    val port = source["port"]
+    return if (port == null) MailProperties(host = host, from = from)
+    else MailProperties(host = host, port = port.toInt(), from = from)
+}
+
+fun main() {
+    val container = BeanContainer()
+    container.register(bind(mapOf("host" to "smtp.corp.io", "port" to "587")))
+    container.register(MailSender(container.get(MailProperties::class.java)))
+
+    println(container.get(MailSender::class.java).send("kim@corp.io"))
+    println(bind(mapOf("host" to "localhost")))
+    println(runCatching { bind(mapOf("port" to "25")) }.exceptionOrNull()?.message)
+    println(runCatching { container.get(String::class.java) }.exceptionOrNull()?.message)
+}
 ```

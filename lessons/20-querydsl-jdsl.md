@@ -163,8 +163,6 @@ QueryDSL의 `where(...)` 가변인자가 하는 일 — **null 조건은 건너�
    - `inOrNull("role", listOf("USER","ADMIN"))` → `role IN ('USER', 'ADMIN')` (`null`이거나 **빈 리스트면** `null`)
    - `goeOrNull("age", 20)` → `age >= 20` (`null`이면 `null`)
 
-힌트: `?.takeIf { }?.let { }` 체인 하나로 각 팩토리가 한 줄이 됩니다. `build()`는 `buildString { }`이 편해요.
-
 ```kotlin starter
 data class MemberSearch(
     val name: String? = null,
@@ -224,4 +222,84 @@ SELECT * FROM member WHERE name LIKE '%박%' ORDER BY id DESC
 SELECT * FROM member WHERE status = 'ACTIVE' AND role IN ('USER', 'ADMIN') AND age >= 20 ORDER BY id DESC
 SELECT * FROM member ORDER BY id DESC
 SELECT * FROM member ORDER BY id DESC
+```
+
+```text hint
+이 문제의 핵심은 **`if` 를 조립기 쪽에 두지 않는 것**입니다. "값이 있나?" 를 판단하는 책임은 조건 팩토리 4개가 각자 지고, 없으면 `null` 을 내놓습니다. 조립기(`where`)는 받은 게 null 인지만 보고 조용히 버려요. 그리고 `build()` — 조건이 하나도 없으면 `WHERE` 라는 글자가 **아예 안 나와야** 합니다. `where 1=1` 을 쓰지 않겠다는 게 바로 이 뜻입니다.
+---
+팩토리 4개는 `?.takeIf { }?.let { }` 한 줄이면 끝납니다. `takeIf` 는 조건이 거짓이면 null 을 내놓으니(Lesson 1), 문자열엔 `isNotBlank()`, 리스트엔 `isNotEmpty()` 를 조건으로 주세요. `goeOrNull` 은 값이 있기만 하면 되니 `?.let { }` 만으로 충분합니다. `build()` 는 `buildString { }` 안에서 `append` 하면 되고, 조각을 잇는 데엔 `joinToString` 의 `separator` · `prefix` · `postfix` 세 인자가 전부 쓰입니다.
+---
+`where(condition)` 는 `condition?.let { conditions += it }` 뒤에 `return this` — `?.let` 이 곧 "null 이면 건너뛴다" 입니다. `build()` 의 WHERE 절은 `if (conditions.isNotEmpty())` 로 한 번 감싸고, 그 안에서 `joinToString(" AND ", prefix = " WHERE ")` 를 쓰세요. `prefix` 를 쓰는 게 요령입니다 — 조건이 없으면 `if` 가 통째로 안 돌아 WHERE 가 사라지고, 있으면 접두사가 딱 한 번만 붙습니다. `inOrNull` 도 같은 함수로 해결돼요. `prefix = "$column IN ("`, `postfix = ")"`, 그리고 각 원소를 작은따옴표로 감싸는 변환 람다까지 **한 번의 호출**에 담깁니다.
+---
+뼈대는 이렇습니다.
+
+`fun where(condition: String?): QueryBuilder { condition?.let { ___ }; return this }`
+
+`build()` 안은 `append("SELECT * FROM ").append(table)` → `if (conditions.___()) append(conditions.joinToString(" AND ", prefix = ___))` → `orderBy?.let { append(" ORDER BY ").append(it) }`.
+
+팩토리는 `value?.takeIf { ___ }?.let { "$column LIKE '%$it%'" }` 꼴입니다.
+```
+
+```kotlin solution
+data class MemberSearch(
+    val name: String? = null,
+    val status: String? = null,
+    val roles: List<String>? = null,
+    val minAge: Int? = null,
+)
+
+class QueryBuilder(private val table: String) {
+    private val conditions = mutableListOf<String>()
+    private var orderBy: String? = null
+
+    // QueryDSL 의 where(...) 가변인자와 같은 계약: null 조건은 조용히 건너뛴다.
+    fun where(condition: String?): QueryBuilder {
+        condition?.let { conditions += it }
+        return this
+    }
+
+    fun orderBy(clause: String): QueryBuilder {
+        orderBy = clause
+        return this
+    }
+
+    fun build(): String = buildString {
+        append("SELECT * FROM ").append(table)
+        // 조건이 하나도 없으면 WHERE 절 자체가 사라진다 — where 1=1 을 쓰지 않는 이유.
+        if (conditions.isNotEmpty()) {
+            append(conditions.joinToString(separator = " AND ", prefix = " WHERE "))
+        }
+        orderBy?.let { append(" ORDER BY ").append(it) }
+    }
+}
+
+// 조건 하나 = null 을 반환할 수 있는 함수 하나. 판정은 전부 takeIf 가 맡는다.
+fun likeOrNull(column: String, value: String?): String? =
+    value?.takeIf { it.isNotBlank() }?.let { "$column LIKE '%$it%'" }
+
+fun eqOrNull(column: String, value: String?): String? =
+    value?.takeIf { it.isNotBlank() }?.let { "$column = '$it'" }
+
+fun inOrNull(column: String, values: List<String>?): String? =
+    values?.takeIf { it.isNotEmpty() }
+        ?.joinToString(separator = ", ", prefix = "$column IN (", postfix = ")") { "'$it'" }
+
+fun goeOrNull(column: String, value: Int?): String? =
+    value?.let { "$column >= $it" }
+
+fun search(cond: MemberSearch): String =
+    QueryBuilder("member")
+        .where(likeOrNull("name", cond.name))
+        .where(eqOrNull("status", cond.status))
+        .where(inOrNull("role", cond.roles))
+        .where(goeOrNull("age", cond.minAge))
+        .orderBy("id DESC")
+        .build()
+
+fun main() {
+    println(search(MemberSearch(name = "박")))
+    println(search(MemberSearch(status = "ACTIVE", roles = listOf("USER", "ADMIN"), minAge = 20)))
+    println(search(MemberSearch(name = "  ", roles = emptyList())))
+    println(search(MemberSearch()))
+}
 ```

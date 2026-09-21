@@ -163,3 +163,48 @@ fun main() = runBlocking {
 병렬 실행됨(600ms 미만): true
 위젯: [weather, FAIL, stock]
 ```
+
+```text hint
+`async` 는 **작업을 시작시킬 뿐** 결과를 기다리지 않습니다. 기다리는 건 `await()` 이고요. 그러니 이 문제의 전부는 **"언제 기다리기 시작하느냐"** 입니다. 세 호출이 각각 300ms 인데 총 300ms 로 끝나려면, 두 번째·세 번째가 **첫 번째를 기다리는 동안** 이미 돌고 있어야 합니다.
+---
+1번은 `coroutineScope` 안에서 `async` 와 `await()`, 2번은 `supervisorScope` 안에서 `async` 와 `runCatching { }.getOrElse { }` 를 씁니다. 1번의 반환은 문자열 템플릿 한 줄로 끝납니다.
+---
+`val a = async { ... }.await()` 처럼 붙여 쓰면 그 줄에서 멈춰 버려서 **다음 `async` 는 시작조차 못 합니다** — 900ms 짜리 순차 코드예요. `async` 세 줄을 먼저 전부 쓰고, 그 **아래에서** `await()` 세 번을 하세요. 2번에서 `supervisorScope` 가 필요한 이유는 따로 있습니다. `coroutineScope` 라면 `runCatching` 으로 `await()` 을 아무리 잘 감싸도, 자식의 실패가 **이미 스코프 자체를 실패시켰기 때문에** 스코프가 끝나는 지점에서 예외가 다시 터집니다. 실패 격리는 `try/catch` 가 아니라 **스코프 선택**으로 하는 겁니다.
+---
+뼈대는 이렇습니다. `coroutineScope { val profile = async { fetchProfile() }; val orders = ___; val points = ___; "${profile.await()} / 주문 ${___}건 / 포인트 ${___}" }` 와 `supervisorScope { val widgets = listOf(async { ... }, ...); widgets.map { d -> runCatching { d.await() }.getOrElse { ___ } } }`.
+```
+
+```kotlin solution
+import kotlinx.coroutines.*
+import kotlin.system.measureTimeMillis
+
+suspend fun fetchProfile(): String { delay(300); return "kim" }
+suspend fun fetchOrderCount(): Int { delay(300); return 3 }
+suspend fun fetchPoints(): Int { delay(300); return 120 }
+
+// async 3개를 먼저 전부 띄우고, 그 다음에 await 한다. 붙여 쓰면 순차가 된다.
+suspend fun loadDashboard(): String = coroutineScope {
+    val profile = async { fetchProfile() }
+    val orders = async { fetchOrderCount() }
+    val points = async { fetchPoints() }
+    "${profile.await()} / 주문 ${orders.await()}건 / 포인트 ${points.await()}"
+}
+
+// supervisorScope 라서 news 의 실패가 형제와 스코프를 죽이지 않는다.
+suspend fun loadWidgets(): List<String> = supervisorScope {
+    val widgets = listOf(
+        async { delay(100); "weather" },
+        async { delay(100); throw RuntimeException("news down") },
+        async { delay(100); "stock" }
+    )
+    widgets.map { d -> runCatching { d.await() }.getOrElse { "FAIL" } }
+}
+
+fun main() = runBlocking {
+    lateinit var dashboard: String
+    val elapsed = measureTimeMillis { dashboard = loadDashboard() }
+    println("대시보드: $dashboard")
+    println("병렬 실행됨(600ms 미만): ${elapsed < 600}")
+    println("위젯: ${loadWidgets()}")
+}
+```

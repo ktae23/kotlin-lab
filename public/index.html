@@ -88,6 +88,37 @@
     border: 0; padding: 6px 14px; font-weight: 600; font-size: 12.5px; cursor: pointer;
   }
   .tabs .run:disabled { opacity: .45; cursor: default; }
+  .tabs .assist {
+    margin: 6px 2px; border: 1px solid var(--line); border-radius: 6px; background: none;
+    color: var(--muted); padding: 5px 11px; font-size: 12px; cursor: pointer; border-bottom-width: 1px;
+  }
+  .tabs .assist:hover:not(:disabled) { border-color: var(--accent); color: var(--fg); }
+  .tabs .assist:disabled { opacity: .4; cursor: default; }
+  .tabs .assist.armed { border-color: #e0a04a; color: #e0a04a; font-weight: 600; }
+
+  .assist-box {
+    border-bottom: 1px solid var(--line); background: var(--panel);
+    padding: 10px 16px; font-size: 13px; max-height: 40%; overflow: auto;
+  }
+  .assist-box .hint { display: flex; gap: 8px; padding: 5px 0; line-height: 1.6; }
+  .assist-box .hint .n {
+    flex: none; width: 18px; height: 18px; border-radius: 50%; background: var(--panel-2);
+    color: var(--muted); font-size: 11px; display: grid; place-items: center; margin-top: 2px;
+  }
+  .assist-box .sol-head {
+    margin: 10px 0 6px; color: #e0a04a; font-size: 12px; font-weight: 600;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .assist-box .sol-head button {
+    background: none; border: 1px solid var(--line); border-radius: 5px; color: var(--muted);
+    font: inherit; font-size: 11px; padding: 3px 8px; cursor: pointer;
+  }
+  .assist-box .sol-head button:hover { border-color: var(--accent); color: var(--fg); }
+  .assist-box pre {
+    margin: 0; padding: 10px 12px; background: var(--bg); border: 1px solid var(--line);
+    border-radius: 6px; overflow-x: auto; font-size: 12.5px; line-height: 1.55;
+  }
+  .assist-box code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 
   .prompt-box { padding: 12px 18px; border-bottom: 1px solid var(--line); background: var(--panel-2); font-size: 13px; color: #c7cdd8; }
   .prompt-box:empty { display: none; }
@@ -140,9 +171,12 @@
     <button id="tabEditor" class="active">웹 에디터</button>
     <button id="tabWatch">파일 감지</button>
     <span class="spacer"></span>
+    <button class="assist" id="hintBtn">힌트</button>
+    <button class="assist danger" id="solBtn">정답</button>
     <button class="run" id="runBtn">실행 ⌘↵</button>
   </div>
   <div class="prompt-box" id="prompt"></div>
+  <div class="assist-box" id="assist" hidden></div>
   <div class="editor-wrap"><textarea id="code"></textarea></div>
   <div class="output" id="output"><span class="empty">실행 결과가 여기 표시됩니다.</span></div>
 </section>
@@ -197,7 +231,82 @@ async function openLesson(id) {
   // 저장해 둔 답안이 있으면 그걸, 없으면 스타터를 띄운다
   cm.setValue(current.saved ?? current.exercise?.starter ?? "fun main() {\n    \n}\n");
   $("output").innerHTML = '<span class="empty">실행 결과가 여기 표시됩니다.</span>';
+  resetAssist();
 }
+
+// -------------------------------------------------------------- 힌트 / 정답
+// 힌트는 한 번에 하나씩, 정답은 두 번 눌러야 열린다 (실수로 보는 걸 막는다)
+let shownHints = 0;
+let solArmed = false;
+let solShown = false;
+
+function resetAssist() {
+  shownHints = 0;
+  solArmed = false;
+  solShown = false;
+  $("assist").hidden = true;
+  $("assist").innerHTML = "";
+  renderAssistButtons();
+}
+
+function renderAssistButtons() {
+  const ex = current?.exercise;
+  const hintBtn = $("hintBtn");
+  const solBtn = $("solBtn");
+  const total = ex?.hints?.length ?? 0;
+
+  hintBtn.disabled = !total || shownHints >= total;
+  hintBtn.textContent = !total
+    ? "힌트 없음"
+    : shownHints === 0
+      ? `힌트 (${total})`
+      : shownHints >= total
+        ? "힌트 끝"
+        : `힌트 더 보기 (${shownHints + 1}/${total})`;
+
+  solBtn.disabled = !ex?.solution || solShown;
+  solBtn.classList.toggle("armed", solArmed && !solShown);
+  solBtn.textContent = !ex?.solution
+    ? "정답 없음"
+    : solShown
+      ? "정답 열림"
+      : solArmed
+        ? "한 번 더 누르면 공개"
+        : "정답";
+}
+
+function renderAssist() {
+  const ex = current?.exercise;
+  if (!ex) return;
+  let html = "";
+  for (let i = 0; i < shownHints; i++) {
+    html += `<div class="hint"><span class="n">${i + 1}</span><div>${marked.parseInline(ex.hints[i])}</div></div>`;
+  }
+  if (solShown && ex.solution) {
+    html += `<div class="sol-head">정답<button id="applySol">에디터에 넣기</button></div>`;
+    html += `<pre><code>${esc(ex.solution)}</code></pre>`;
+  }
+  const box = $("assist");
+  box.innerHTML = html;
+  box.hidden = !html;
+  const apply = $("applySol");
+  if (apply) apply.onclick = () => { cm.setValue(ex.solution); cm.focus(); };
+}
+
+$("hintBtn").onclick = () => {
+  const total = current?.exercise?.hints?.length ?? 0;
+  if (shownHints < total) shownHints++;
+  renderAssist();
+  renderAssistButtons();
+};
+
+$("solBtn").onclick = () => {
+  if (!current?.exercise?.solution) return;
+  if (!solArmed) { solArmed = true; renderAssistButtons(); return; }
+  solShown = true;
+  renderAssist();
+  renderAssistButtons();
+};
 
 // -------------------------------------------------------------------- 실행
 async function run() {

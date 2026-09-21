@@ -37,7 +37,13 @@ type RunResult = {
   durationMs: number;
 };
 
-type Exercise = { prompt: string; starter: string; expected: string };
+type Exercise = {
+  prompt: string;
+  starter: string;
+  expected: string;
+  hints: string[];      // ```text hint``` 을 `---` 로 나눈 단계별 힌트
+  solution: string | null; // ```kotlin solution```
+};
 type Lesson = { id: string; title: string; order: number; theory: string; exercise: Exercise | null };
 
 fs.mkdirSync(WORKSPACE_DIR, { recursive: true });
@@ -55,6 +61,16 @@ function parseLesson(file: string): Lesson {
   const starter = raw.match(/```kotlin starter\n([\s\S]*?)```/);
   const expected = raw.match(/```text expected\n([\s\S]*?)```/);
   const prompt = raw.match(/##\s*연습\s*\n([\s\S]*?)(?=```kotlin starter)/);
+  const hint = raw.match(/```text hint\n([\s\S]*?)```/);
+  const solution = raw.match(/```kotlin solution\n([\s\S]*?)```/);
+
+  // 힌트는 `---` 한 줄로 나눠 단계별로 공개한다. 블록이 없으면 빈 배열.
+  const hints = hint
+    ? hint[1]
+        .split(/^---$/m)
+        .map((h) => h.trim())
+        .filter(Boolean)
+    : [];
 
   return {
     id,
@@ -67,6 +83,8 @@ function parseLesson(file: string): Lesson {
             prompt: prompt?.[1].trim() ?? "",
             starter: starter[1].replace(/\n$/, ""),
             expected: expected[1].trim(),
+            hints,
+            solution: solution ? solution[1].replace(/\n$/, "") : null,
           }
         : null,
   };
