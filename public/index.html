@@ -134,6 +134,7 @@
   .navbar button.primary:not(:disabled) {
     background: var(--accent); color: #10131a; border-color: var(--accent); font-weight: 600;
   }
+  .navbar button.armed { border-color: #e0a04a; color: #e0a04a; font-weight: 600; }
   .navbar .status { flex: 1; font-size: 12px; color: var(--muted); }
   .navbar .status.done { color: #56b98a; }
   .lesson-list .check { color: #56b98a; margin-right: 4px; font-size: 11px; }
@@ -200,6 +201,7 @@
   <div class="navbar">
     <button id="prevBtn">← 이전</button>
     <span class="status" id="navStatus"></span>
+    <button id="resetBtn">스타터로 되돌리기</button>
     <button id="saveBtn">진도 저장</button>
     <button id="nextBtn" class="primary">다음 →</button>
   </div>
@@ -276,6 +278,8 @@ async function openLesson(id) {
   $("output").innerHTML = '<span class="empty">실행 결과가 여기 표시됩니다.</span>';
   resetAssist();
   renderNav();
+  resetArmed = false;
+  renderResetBtn();
 }
 
 // ------------------------------------------------------------------ 진도 / 내비
@@ -325,11 +329,37 @@ $("prevBtn").onclick = () => { const i = idx(); if (i > 0) openLesson(lessons[i 
 $("nextBtn").onclick = () => { const i = idx(); if (i < lessons.length - 1) openLesson(lessons[i + 1].id); };
 $("saveBtn").onclick = () => setProgress(!isDone());
 
+// 스타터로 되돌리기 — 레슨 문제가 갱신됐거나 처음부터 다시 풀 때.
+// 작업 중인 코드를 덮어쓰므로 두 번 눌러야 실행된다.
+function renderResetBtn() {
+  const b = $("resetBtn");
+  b.disabled = !current?.exercise?.starter;
+  b.classList.toggle("armed", resetArmed);
+  b.textContent = resetArmed ? "정말 되돌릴까요?" : "스타터로 되돌리기";
+}
+// 주소창의 해시로 레슨을 바꾼다 — 뒤로가기/앞으로가기, 그리고
+// 이미 열린 탭에 #레슨id 로 다시 여는 경우를 지원한다.
+window.addEventListener("hashchange", () => {
+  const id = location.hash.slice(1);
+  if (id && id !== current?.id && lessons.some((l) => l.id === id)) openLesson(id);
+});
+
+$("resetBtn").onclick = () => {
+  const st = current?.exercise?.starter;
+  if (!st) return;
+  if (!resetArmed) { resetArmed = true; renderResetBtn(); return; }
+  cm.setValue(st);
+  cm.focus();
+  resetArmed = false;
+  renderResetBtn();
+};
+
 // -------------------------------------------------------------- 힌트 / 정답
 // 힌트는 한 번에 하나씩, 정답은 두 번 눌러야 열린다 (실수로 보는 걸 막는다)
 let shownHints = 0;
 let solArmed = false;
 let solShown = false;
+let resetArmed = false;       // 스타터 되돌리기 2단계 확인
 let hintsCollapsed = false;   // 다 본 뒤 접어두기
 let solCollapsed = false;
 
