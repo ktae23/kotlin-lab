@@ -330,11 +330,15 @@ $("saveBtn").onclick = () => setProgress(!isDone());
 let shownHints = 0;
 let solArmed = false;
 let solShown = false;
+let hintsCollapsed = false;   // 다 본 뒤 접어두기
+let solCollapsed = false;
 
 function resetAssist() {
   shownHints = 0;
   solArmed = false;
   solShown = false;
+  hintsCollapsed = false;
+  solCollapsed = false;
   $("assist").hidden = true;
   $("assist").innerHTML = "";
   renderAssistButtons();
@@ -346,37 +350,46 @@ function renderAssistButtons() {
   const solBtn = $("solBtn");
   const total = ex?.hints?.length ?? 0;
 
-  hintBtn.disabled = !total || shownHints >= total;
+  // 힌트: 남았으면 다음 단계, 다 봤으면 접기/펴기 토글
+  hintBtn.disabled = !total;
   hintBtn.textContent = !total
     ? "힌트 없음"
     : shownHints === 0
       ? `힌트 (${total})`
-      : shownHints >= total
-        ? "힌트 끝"
-        : `힌트 더 보기 (${shownHints + 1}/${total})`;
+      : shownHints < total
+        ? `힌트 더 보기 (${shownHints + 1}/${total})`
+        : hintsCollapsed
+          ? `힌트 펴기 (${total})`
+          : "힌트 접기";
 
-  solBtn.disabled = !ex?.solution || solShown;
+  // 정답: 두 번 눌러야 공개, 공개 뒤엔 접기/펴기 토글
+  solBtn.disabled = !ex?.solution;
   solBtn.classList.toggle("armed", solArmed && !solShown);
   solBtn.textContent = !ex?.solution
     ? "정답 없음"
-    : solShown
-      ? "정답 열림"
-      : solArmed
-        ? "한 번 더 누르면 공개"
-        : "정답";
+    : !solShown
+      ? (solArmed ? "한 번 더 누르면 공개" : "정답")
+      : solCollapsed
+        ? "정답 펴기"
+        : "정답 접기";
 }
 
 function renderAssist() {
   const ex = current?.exercise;
   if (!ex) return;
   let html = "";
-  for (let i = 0; i < shownHints; i++) {
-    html += `<div class="hint"><span class="n">${i + 1}</span><div>${marked.parseInline(ex.hints[i])}</div></div>`;
+
+  const showHints = shownHints > 0 && !hintsCollapsed;
+  if (showHints) {
+    for (let i = 0; i < shownHints; i++) {
+      html += `<div class="hint"><span class="n">${i + 1}</span><div>${marked.parseInline(ex.hints[i])}</div></div>`;
+    }
   }
-  if (solShown && ex.solution) {
+  if (solShown && !solCollapsed && ex.solution) {
     html += `<div class="sol-head">정답<button id="applySol">에디터에 넣기</button></div>`;
     html += `<pre><code>${esc(ex.solution)}</code></pre>`;
   }
+
   const box = $("assist");
   box.innerHTML = html;
   box.hidden = !html;
@@ -386,15 +399,22 @@ function renderAssist() {
 
 $("hintBtn").onclick = () => {
   const total = current?.exercise?.hints?.length ?? 0;
-  if (shownHints < total) shownHints++;
+  if (!total) return;
+  if (shownHints < total) { shownHints++; hintsCollapsed = false; }
+  else hintsCollapsed = !hintsCollapsed;
   renderAssist();
   renderAssistButtons();
 };
 
 $("solBtn").onclick = () => {
   if (!current?.exercise?.solution) return;
-  if (!solArmed) { solArmed = true; renderAssistButtons(); return; }
-  solShown = true;
+  if (!solShown) {
+    if (!solArmed) { solArmed = true; renderAssistButtons(); return; }
+    solShown = true;
+    solCollapsed = false;
+  } else {
+    solCollapsed = !solCollapsed;
+  }
   renderAssist();
   renderAssistButtons();
 };
