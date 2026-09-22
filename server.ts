@@ -342,10 +342,25 @@ const server = http.createServer(async (req, res) => {
     const lesson = loadLessons().find((l) => l.id === id);
     if (!lesson) return json(res, 404, { error: "레슨을 찾을 수 없습니다" });
     const saved = path.join(WORKSPACE_DIR, `${lesson.id}.kt`);
-    return json(res, 200, {
-      ...lesson,
-      saved: fs.existsSync(saved) ? fs.readFileSync(saved, "utf-8") : null,
-    });
+    let savedCode = fs.existsSync(saved) ? fs.readFileSync(saved, "utf-8") : null;
+
+    // 레슨 연습이 교체되면 예전 답안이 새 스타터를 덮어써 엉뚱한 문제가 뜬다.
+    // 스타터의 함수 이름이 저장본에 하나도 없으면 다른 문제의 답안으로 보고 치운다.
+    if (savedCode && lesson.exercise) {
+      const names = [...lesson.exercise.starter.matchAll(/fun\s+(\w+)\s*\(/g)]
+        .map((m) => m[1])
+        .filter((n) => n !== "main");
+      const stale = names.length > 0 && !names.some((n) => savedCode!.includes(`fun ${n}(`));
+      if (stale) {
+        const bak = path.join(WORKSPACE_DIR, "stale");
+        fs.mkdirSync(bak, { recursive: true });
+        fs.renameSync(saved, path.join(bak, `${lesson.id}.${Date.now()}.kt`));
+        console.log(`  [workspace] ${lesson.id}: 예전 연습의 답안을 stale/ 로 옮김`);
+        savedCode = null;
+      }
+    }
+
+    return json(res, 200, { ...lesson, saved: savedCode });
   }
 
   if (route === "/api/run" && req.method === "POST") {
