@@ -193,7 +193,13 @@ fun memo(log: String): String {
     TODO("isEmpty 가 아니다")
 }
 
-// raw string + 템플릿으로 아래 형태를 만든다 (들여쓰기 없이 6줄)
+// raw string + 템플릿으로 아래 형태를 만든다 (들여쓰기 없이 6줄, 구분선은 '=' 24개)
+//   ========================
+//   주문 {orderId}
+//   금액 {amount 를 '.' 으로 앞을 채워 10칸}
+//   태그 {tags}
+//   메모 {memo}
+//   ========================
 fun receipt(log: String): String {
     TODO("\"\"\" 와 trimIndent, 금액은 padStart(10, '.')")
 }
