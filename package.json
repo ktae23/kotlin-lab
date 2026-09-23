@@ -1,12 +1,15 @@
 {
   "name": "kotlin-lab",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "type": "module",
-  "description": "Java/Spring 백엔드 개발자를 위한 Kotlin 8주 학습 레포 (레슨 24개 + 학습 서버)",
+  "description": "Java/Spring 백엔드 개발자를 위한 Kotlin 10주 학습 레포 (레슨 50개 + 정적 학습 사이트)",
   "scripts": {
     "prestart": "bash scripts/fetch-deps.sh",
     "start": "node server.ts",
-    "deps": "bash scripts/fetch-deps.sh"
+    "deps": "bash scripts/fetch-deps.sh",
+    "build:site": "node scripts/build-site.mjs",
+    "preview": "node scripts/build-site.mjs && python3 -m http.server 4173 --directory site --bind 127.0.0.1",
+    "deploy": "node scripts/build-site.mjs && npx wrangler pages deploy site --project-name kotlin-lab"
   },
   "engines": {
     "node": ">=22"

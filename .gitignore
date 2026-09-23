@@ -15,3 +15,15 @@ npm-debug.log*
 .idea/
 .vscode/
 *.swp
+
+# 시크릿 — 공개 레포이므로 절대 커밋되지 않게
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.keystore
+secrets.json
+credentials*
+.dev.vars
