@@ -34,7 +34,9 @@ n=$(ls site/data/*.json 2>/dev/null | wc -l)
 HUB="${STUDY_HUB_DIR:-/srv/study}"
 if [ -d "$HUB" ] && [ -w "$HUB" ]; then
   cp deploy/hub/index.html "$HUB/index.html"
-  echo "허브 갱신: $HUB/index.html"
+  # 옛 Cairn PWA 서비스 워커를 걷어내는 kill-switch (deploy/hub/sw.js 주석 참고)
+  cp deploy/hub/sw.js "$HUB/sw.js"
+  echo "허브 갱신: $HUB/{index.html,sw.js}"
 fi
 
 echo "갱신 완료: $(git log -1 --format='%h %s')  (레슨 데이터 ${n}개)"
