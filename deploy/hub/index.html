@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>학습</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+<style>
+  :root { --bg:#14161a; --panel:#1b1e24; --line:#2d323b; --fg:#dfe3ea; --muted:#8b93a1; --accent:#7f9cf5; }
+  * { box-sizing: border-box; }
+  body {
+    margin:0; min-height:100vh; background:var(--bg); color:var(--fg);
+    font:15px/1.7 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", Pretendard, sans-serif;
+    display:grid; place-items:center; padding:32px;
+  }
+  .wrap { width:100%; max-width:560px; }
+  h1 { font-size:20px; margin:0 0 4px; letter-spacing:-.3px; }
+  .sub { color:var(--muted); font-size:13px; margin:0 0 28px; }
+  a.card {
+    display:block; text-decoration:none; color:inherit;
+    background:var(--panel); border:1px solid var(--line); border-radius:10px;
+    padding:16px 18px; margin-bottom:10px; transition:border-color .15s;
+  }
+  a.card:hover { border-color:var(--accent); }
+  a.card .t { font-weight:600; font-size:15px; }
+  a.card .d { color:var(--muted); font-size:13px; margin-top:3px; }
+  .soon { opacity:.45; }
+  footer { color:var(--muted); font-size:12px; margin-top:24px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>학습</h1>
+  <p class="sub">과목별 기록과 연습</p>
+
+  <a class="card" href="/kotlin/">
+    <div class="t">Kotlin</div>
+    <div class="d">50레슨 · 언어 기초부터 Gradle·Spring 실전까지. 연습은 브라우저에서 바로 실행·채점</div>
+  </a>
+
+  <div class="card soon">
+    <div class="t">TIL</div>
+    <div class="d">준비 중</div>
+  </div>
+
+  <footer>진도는 이 브라우저에만 저장됩니다.</footer>
+</div>
+</body>
+</html>

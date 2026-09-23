@@ -29,4 +29,12 @@ cd "$DIR"
 # 4GB / 2 vCPU 에 서비스가 둘 더 살고 있어 빌드 부하를 얹지 않는다.
 test -f site/index.html || { echo "site/index.html 이 없다. 빌드 산출물이 커밋됐는지 확인"; exit 1; }
 n=$(ls site/data/*.json 2>/dev/null | wc -l)
+
+# 허브 페이지도 같이 반영한다 (경로로 과목을 나누므로 / 는 허브가 받는다)
+HUB="${STUDY_HUB_DIR:-/srv/study}"
+if [ -d "$HUB" ] && [ -w "$HUB" ]; then
+  cp deploy/hub/index.html "$HUB/index.html"
+  echo "허브 갱신: $HUB/index.html"
+fi
+
 echo "갱신 완료: $(git log -1 --format='%h %s')  (레슨 데이터 ${n}개)"

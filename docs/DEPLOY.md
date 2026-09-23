@@ -3,9 +3,14 @@
 이미 도는 서버에 **정적 파일만** 얹는다. 새 서비스도, 새 포트도, 시크릿도 없다.
 
 ```
-인터넷 → Caddy(:443, 자동 HTTPS) → /srv/kotlin-lab/site  (정적 파일)
+인터넷 → Caddy(:443, 자동 HTTPS) → cairn.today/kotlin/ → /srv/kotlin-lab/site
 브라우저 → api.kotlinlang.org                            (Kotlin 실행)
 ```
+
+**과목은 경로로 나눈다.** `/` 는 허브, `/kotlin/` 은 이 레포, 나중에 `/til/` 등을 같은 방식으로 더한다.
+
+> **선행 작업**: 지금 서버의 Caddy 는 언제한번 스택 안에 있다.
+> [`SERVER-CLEANUP.md`](SERVER-CLEANUP.md) 로 프록시를 독립시킨 뒤 이 문서를 따른다.
 
 ## 전제
 
@@ -43,10 +48,10 @@ npm run build:site && git add site && git commit && git push
 
 ### 1. DNS (USER_ACTION)
 
-가비아에서 A 레코드 추가:
+가비아에서 A 레코드 추가 (현재 `cairn.today` 는 비어 있다):
 
 ```
-kotlin.cairn.today  →  3.35.203.67
+cairn.today  →  3.35.203.67
 ```
 
 ### 2. 서버에 받기
@@ -85,11 +90,19 @@ systemctl list-timers kotlin-lab-sync   # 다음 실행 시각 확인
 
 10분마다 `git pull` 한다. 급하면 `sudo systemctl start kotlin-lab-sync`.
 
-### 6. 확인
+### 6. 허브 배치
 
 ```bash
-curl -sI https://kotlin.cairn.today/ | head -1     # 401 이어야 한다 (basic_auth)
-curl -sI -u kotlin:비밀번호 https://kotlin.cairn.today/ | head -1   # 200
+sudo mkdir -p /srv/study && sudo chown "$USER" /srv/study
+cp /srv/kotlin-lab/deploy/hub/index.html /srv/study/index.html
+```
+
+### 7. 확인
+
+```bash
+curl -sI https://cairn.today/ | head -1                      # 401 (basic_auth)
+curl -sI -u study:비밀번호 https://cairn.today/ | head -1      # 200 — 허브
+curl -sI -u study:비밀번호 https://cairn.today/kotlin/ | head -1  # 200 — Kotlin
 ```
 
 브라우저로 열어 로그인 → 레슨 50개가 보이면 끝이다.

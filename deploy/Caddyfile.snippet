@@ -1,32 +1,59 @@
-# Kotlin Lab — 정적 학습 사이트
+# 학습 사이트 — cairn.today
 #
-# 서버의 Caddyfile 에 이 블록을 통째로 붙인다.
+# 과목을 경로로 나눈다. 새 과목은 handle_path 블록만 추가하면 된다.
+#   /          → 허브 (과목 목록)
+#   /kotlin/   → kotlin-lab (이 레포)
+#   /til/      → (예정) TIL
+#
 # 백엔드가 없다. Kotlin 실행은 브라우저가 api.kotlinlang.org 로 직접 보낸다.
 #
-# 사전 조건 (USER_ACTION)
-#   1. 가비아 DNS 에 A 레코드 추가:  kotlin.cairn.today → 3.35.203.67
-#   2. 비밀번호 해시 생성 (서버에서 1회):
-#        docker run --rm caddy:2-alpine caddy hash-password --plaintext '원하는_비밀번호'
-#      출력된 $2a$... 를 아래 REPLACE_WITH_BCRYPT_HASH 자리에 붙여넣는다.
+# ── 사전 조건 (USER_ACTION) ─────────────────────────────────────────
+# 1. 가비아 DNS:  cairn.today → 3.35.203.67  (A 레코드, 현재 비어 있음)
+# 2. 비밀번호 해시 (서버에서 1회):
+#      docker run --rm caddy:2-alpine caddy hash-password --plaintext '원하는_비밀번호'
+#    출력된 $2a$... 를 아래 REPLACE_WITH_BCRYPT_HASH 자리에 넣는다.
+#    이 값은 서버에만 남고 레포에 들어가지 않는다.
+#
+# ── 주의 ────────────────────────────────────────────────────────────
+# cairn.today 는 Cairn 제품 도메인이기도 하다(cairn-app / cairn-ios).
+# 나중에 제품이 apex 를 쓰게 되면 학습 사이트를 study.cairn.today 같은
+# 서브도메인으로 옮겨야 한다. 그때 바꿀 곳은 이 블록의 주소 한 줄뿐이다.
 
-kotlin.cairn.today {
+cairn.today {
 	import security_headers
 
 	# 진도는 브라우저 localStorage 에만 남는다. 남이 못 들어오게만 하면 된다.
-	# oauth2-proxy 로 구글 로그인을 붙일 수도 있지만 컨테이너가 하나 더 뜬다 —
-	# 4GB 에 언제한번·굿모닝이 이미 사는 상황이라 basic_auth 로 간다.
 	basic_auth {
-		kotlin REPLACE_WITH_BCRYPT_HASH
+		study REPLACE_WITH_BCRYPT_HASH
 	}
 
-	root * /srv/kotlin-lab/site
-	file_server
 	encode gzip
 
-	# CSP 는 페이지가 <meta> 로 직접 들고 있다 (script-src 에 'unsafe-inline' 없음).
-	# 여기서 또 내리면 두 정책의 교집합이 적용돼 디버깅이 어려워진다. 겹치지 않게 둔다.
+	# ── 과목: Kotlin ──────────────────────────────────────────────
+	# handle_path 가 /kotlin 접두사를 떼므로 site/ 를 그대로 루트로 쓴다.
+	redir /kotlin /kotlin/          # 슬래시가 없으면 상대 경로(app.js, data/)가 깨진다
+	handle_path /kotlin/* {
+		root * /srv/kotlin-lab/site
+		file_server
 
-	# 레슨 데이터는 배포마다 바뀐다 — 캐시가 오래 남으면 고친 레슨이 안 보인다
-	@data path /data/*
-	header @data Cache-Control "no-cache"
+		# 레슨 데이터는 배포마다 바뀐다 — 캐시가 남으면 고친 레슨이 안 보인다
+		@data path /data/*
+		header @data Cache-Control "no-cache"
+	}
+
+	# ── 과목 추가 자리 ────────────────────────────────────────────
+	# redir /til /til/
+	# handle_path /til/* {
+	#     root * /srv/til/site
+	#     file_server
+	# }
+
+	# ── 허브 ──────────────────────────────────────────────────────
+	handle {
+		root * /srv/study
+		file_server
+	}
+
+	# CSP 는 각 과목 페이지가 <meta> 로 직접 들고 있다.
+	# 여기서 또 내리면 두 정책의 교집합이 적용돼 디버깅이 어려워진다. 겹치지 않게 둔다.
 }
