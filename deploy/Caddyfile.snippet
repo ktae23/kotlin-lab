@@ -23,9 +23,15 @@ cairn.today {
 	import security_headers
 
 	# 진도는 브라우저 localStorage 에만 남는다. 남이 못 들어오게만 하면 된다.
-	basic_auth {
+	# /sw.js 만 인증에서 뺀다 — 옛 PWA 서비스 워커가 이 파일을 받아야 스스로를 지운다.
+	# 401 이면 업데이트가 실패해 옛 워커가 남고, 사용자는 로그인 창조차 못 본다.
+	@protected not path /sw.js
+	basic_auth @protected {
 		study REPLACE_WITH_BCRYPT_HASH
 	}
+
+	@sw path /sw.js
+	header @sw Cache-Control "no-store"
 
 	encode gzip
 
