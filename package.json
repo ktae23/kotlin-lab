@@ -8,8 +8,7 @@
     "start": "node server.ts",
     "deps": "bash scripts/fetch-deps.sh",
     "build:site": "node scripts/build-site.mjs",
-    "preview": "node scripts/build-site.mjs && python3 -m http.server 4173 --directory site --bind 127.0.0.1",
-    "deploy": "node scripts/build-site.mjs && npx wrangler pages deploy site --project-name kotlin-lab"
+    "preview": "node scripts/build-site.mjs && python3 -m http.server 4173 --directory site --bind 127.0.0.1"
   },
   "engines": {
     "node": ">=22"

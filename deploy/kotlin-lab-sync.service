@@ -1,0 +1,13 @@
+[Unit]
+Description=kotlin-lab 최신본 동기화
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/srv/kotlin-lab/deploy/sync.sh
+# 정적 파일만 다루므로 권한을 최소로
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/srv/kotlin-lab

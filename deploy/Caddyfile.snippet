@@ -1,0 +1,32 @@
+# Kotlin Lab — 정적 학습 사이트
+#
+# 서버의 Caddyfile 에 이 블록을 통째로 붙인다.
+# 백엔드가 없다. Kotlin 실행은 브라우저가 api.kotlinlang.org 로 직접 보낸다.
+#
+# 사전 조건 (USER_ACTION)
+#   1. 가비아 DNS 에 A 레코드 추가:  kotlin.cairn.today → 3.35.203.67
+#   2. 비밀번호 해시 생성 (서버에서 1회):
+#        docker run --rm caddy:2-alpine caddy hash-password --plaintext '원하는_비밀번호'
+#      출력된 $2a$... 를 아래 REPLACE_WITH_BCRYPT_HASH 자리에 붙여넣는다.
+
+kotlin.cairn.today {
+	import security_headers
+
+	# 진도는 브라우저 localStorage 에만 남는다. 남이 못 들어오게만 하면 된다.
+	# oauth2-proxy 로 구글 로그인을 붙일 수도 있지만 컨테이너가 하나 더 뜬다 —
+	# 4GB 에 언제한번·굿모닝이 이미 사는 상황이라 basic_auth 로 간다.
+	basic_auth {
+		kotlin REPLACE_WITH_BCRYPT_HASH
+	}
+
+	root * /srv/kotlin-lab/site
+	file_server
+	encode gzip
+
+	# CSP 는 페이지가 <meta> 로 직접 들고 있다 (script-src 에 'unsafe-inline' 없음).
+	# 여기서 또 내리면 두 정책의 교집합이 적용돼 디버깅이 어려워진다. 겹치지 않게 둔다.
+
+	# 레슨 데이터는 배포마다 바뀐다 — 캐시가 오래 남으면 고친 레슨이 안 보인다
+	@data path /data/*
+	header @data Cache-Control "no-cache"
+}
