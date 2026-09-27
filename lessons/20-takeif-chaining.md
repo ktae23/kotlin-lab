@@ -81,26 +81,47 @@ fun finalPrice(price: Int, raw: String?): Int {
 
 비슷해 보이는 것들이 표준 라이브러리에 이미 있습니다. **직접 만들지 말고 골라 쓰세요.**
 
-| 도구 | 시그니처 | 실패했을 때 |
+| 도구 | 블록이 받는 것 | 조건에 걸렸을 때 |
 |---|---|---|
-| `takeIf { }` | `T.() -> T?` | **null** |
-| `takeUnless { }` | `T.() -> T?` | **null** |
-| `ifEmpty { }` | `String.() -> String` | 블록이 준 **대체값** |
-| `ifBlank { }` | `String.() -> String` | 블록이 준 **대체값** |
-| `orEmpty()` | `String?.() -> String` | `""` |
+| `takeIf { }` | 술어 `(T) -> Boolean` (람다 안은 `it`) | **null** |
+| `takeUnless { }` | 술어 `(T) -> Boolean` (람다 안은 `it`) | **null** |
+| `ifEmpty { }` | 대체값을 만드는 `() -> R` | 블록이 준 **대체값** |
+| `ifBlank { }` | 대체값을 만드는 `() -> R` | 블록이 준 **대체값** |
+| `orEmpty()` | 블록 없음 | `""` |
+
+실제 stdlib 선언은 이렇습니다.
+
+```kotlin
+public inline fun <T> T.takeIf(predicate: (T) -> Boolean): T?
+public inline fun <T> T.takeUnless(predicate: (T) -> Boolean): T?
+public inline fun <C, R> C.ifEmpty(defaultValue: () -> R): R where C : CharSequence, C : R
+public inline fun <C, R> C.ifBlank(defaultValue: () -> R): R where C : CharSequence, C : R
+public inline fun String?.orEmpty(): String
+```
+
+세 가지를 짚어 둘 값어치가 있습니다.
+
+- `takeIf` 의 술어는 **평범한 `(T) -> Boolean`** 이지 수신 객체 지정 람다(`T.() -> Boolean`)가 **아닙니다.** 그래서 블록 안이 `this` 가 아니라 `it` 이고, `4.takeIf { x: Int -> x % 2 == 0 }` 처럼 파라미터에 이름을 직접 붙여도 그대로 컴파일됩니다.
+- `ifBlank`/`ifEmpty` 의 블록은 **인자도 수신 객체도 받지 않고**, 반환 타입이 `String` 으로 고정된 것도 아닙니다. 타입 파라미터가 `R` 이라 `"".ifBlank { 42 }` 는 **`42` 를 돌려줍니다**(`String` 과 `Int` 의 공통 상위 타입으로 추론). 문자열이 필요하면 블록도 문자열을 주면 됩니다 — 평소 쓰는 방식 그대로고요.
+- `orEmpty()` 는 `String?` 의 확장이지만 같은 이름이 `List<T>?`, `Map<K, V>?`, `Array<T>?` 에도 있습니다. 표의 `""` 는 `String` 판 이야기예요.
 
 기준은 하나입니다. **뒤에 더 이어붙일 게 있으면 null 경유(`takeIf`), 여기서 끝나면 직접 대체(`ifBlank`).**
 
 ```kotlin
+val rawCity: String? = request.city     // nullable
+val rawName: String = form.name         // non-null
+
 // 뒤에 uppercase() 가 더 붙는다 → null 경유
-val city = raw?.takeIf { it.isNotBlank() }?.uppercase() ?: "N/A"
+val city = rawCity?.takeIf { it.isNotBlank() }?.uppercase() ?: "N/A"
 
 // 여기서 끝난다 → 직접 대체가 짧고 명확
-val name = raw.ifBlank { "익명" }
+val name = rawName.ifBlank { "익명" }
 
 // ✗ 이건 돌아가는 길
-val name = raw.takeIf { it.isNotBlank() } ?: "익명"
+val name2 = rawName.takeIf { it.isNotBlank() } ?: "익명"
 ```
+
+(`ifBlank` 는 `CharSequence` 의 확장이라 **수신 객체가 non-null 이어야** 합니다. 위에서 `city` 쪽만 `?.` 로 이어지는 이유예요.)
 
 마지막 줄은 틀린 코드는 아니지만 **`ifBlank` 가 이미 있는데 두 단계로 돌아간 것**입니다.
 리뷰에서 지적할 만한 수준이에요.
@@ -157,6 +178,18 @@ coupon.takeUnless { it.expired }     // ✓ takeUnless 가 있는 이유
 > 면접관 시점: "`takeIf` 를 언제 쓰나요?" 에 "조건부로 값을 거를 때"만 답하면 평범합니다.
 > **"뒤에 체인이 이어질 때. 안 이어지면 `if` 가 낫다"** 까지 말하면 도구를 판단 기준으로
 > 갖고 있다는 뜻이고, 그게 리뷰어의 자질입니다.
+
+## 리뷰할 때 보는 것
+
+| 코드에서 보이면 | 이렇게 지적한다 |
+|---|---|
+| `takeIf` 블록 안에 로그·저장 같은 부수 효과 | `takeIf` 는 **판정**만 한다. 부수 효과는 `also` 로 빼라 |
+| `x.takeIf { it > 0 }` 뒤에 아무것도 안 붙음 | 체인이 안 이어지면 `if` 가 읽기 쉽다. `takeIf` 는 **뒤에 더 붙을 때** 값을 한다 |
+| `takeIf { !조건 }` | 부정이 한 겹 더 쌓인다. `takeUnless { 조건 }` |
+| `?.` 체인이 일곱 칸 | 어디서 null 이 됐는지 못 찾는다. 중간에 `?: return` 으로 끊어라 |
+| 실패를 전부 `?: 기본값` 으로 | 버그가 기본값으로 위장된다. null 이 정상이면 `?:`, 버그면 `requireNotNull` |
+| non-null 인데 `ifBlank` 대신 `takeIf { it.isNotBlank() } ?: …` | `ifBlank { }` 가 null 을 경유하지 않아 짧다 |
+| `runCatching { }` 안에 suspend 호출 | `CancellationException` 까지 삼킨다. 취소가 깨진다 (Lesson 27) |
 
 ## 연습
 
@@ -222,7 +255,7 @@ VIP30 적용 — 30% 할인
 ---
 쓸 도구: `trim()`, `uppercase()`, `takeIf { }`, `takeUnless { }`, `?.let { }`, `?:`. 맵 조회는 `coupons[key]` 가 못 찾으면 **알아서 null** 을 주므로 별도 검사가 필요 없습니다 — 그래서 `?.let { coupons[it] }` 한 칸이 조회와 실패 처리를 동시에 합니다.
 ---
-순서가 중요합니다. 문자열 단계(`trim` → `uppercase` → 길이 검사)를 먼저 하고, 그다음 `?.let { coupons[it] }` 로 **타입이 `Coupon?` 으로 바뀐 뒤** 만료·할인율을 검사하세요. 실패 메시지의 `(입력: ...)` 에는 **가공 전 `raw`** 가 들어가야 하는데, `?:` 오른쪽에서는 바깥 파라미터를 그대로 읽을 수 있습니다 — `${raw ?: "없음"}`. `finalPrice` 는 `val coupon = ... ?: return price` 형태로 쓰면 그 아래에서 `coupon` 이 non-null 로 스마트 캐스트됩니다.
+순서가 중요합니다. 문자열 단계(`trim` → `uppercase` → 길이 검사)를 먼저 하고, 그다음 `?.let { coupons[it] }` 로 **타입이 `Coupon?` 으로 바뀐 뒤** 만료·할인율을 검사하세요. 실패 메시지의 `(입력: ...)` 에는 **가공 전 `raw`** 가 들어가야 하는데, `?:` 오른쪽에서는 바깥 파라미터를 그대로 읽을 수 있습니다 — `${raw ?: "없음"}`. `finalPrice` 는 `val coupon = ... ?: return price` 형태로 쓰면 그 아래에서 `coupon` 을 그냥 `Coupon` 으로 씁니다 — 스마트 캐스트가 아니라 **`val` 의 추론 타입 자체가 non-null** 이에요. `?:` 오른쪽이 `Nothing`(=값을 내놓지 않음)이라 왼쪽의 null 가능성이 타입에서 빠지거든요.
 ---
 뼈대는 이렇습니다.
 

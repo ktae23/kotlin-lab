@@ -57,10 +57,25 @@ operator fun contains(day: Int) = day in from..to         // 15 in range
 
 ## += 의 함정 — plus 와 plusAssign
 
-여기가 실무에서 실제로 물리는 곳입니다. `a += b` 를 만나면 컴파일러는 **두 가지 경로**를 봅니다.
+여기가 실무에서 실제로 물리는 곳입니다. `a += b` 를 만나면 컴파일러는 **세 단계**로 판정합니다.
 
-1. `a.plusAssign(b)` 가 있으면 → **a 자기 자신을 변경**
-2. 없으면 `a = a.plus(b)` 로 풀어서 → **새 객체를 만들어 재대입** (그래서 `a` 가 `var` 여야 함)
+1. `a.plusAssign(b)` 가 적용 가능하면 → **a 자기 자신을 변경**
+2. 없고 `a = a.plus(b)` 가 적용 가능하면 → **새 객체를 만들어 재대입** (그래서 `a` 가 `var` 여야 함)
+3. **둘 다 적용 가능하면 → 컴파일 에러**
+
+3번을 빠뜨리고 외우면 값 객체를 설계하다 바로 밟습니다.
+
+```kotlin
+class Bag(val items: MutableList<Int> = mutableListOf()) {
+    operator fun plus(n: Int) = Bag((items + n).toMutableList())
+    operator fun plusAssign(n: Int) { items.add(n) }
+}
+
+var b = Bag()
+b += 1        // ✗ error: ambiguity between assign operator candidates: plus / plusAssign
+```
+
+"불변식으로 `plus` 도 주고, 편의로 `plusAssign` 도 주자" 가 정확히 이 에러입니다. 컴파일러는 **둘 중 뭘 원했는지 짐작하지 않습니다.** 규칙은 하나예요 — **불변 값 객체면 `plus` 만, 가변 컨테이너면 `plusAssign` 만.** 한 타입에 둘 다 두지 마세요.
 
 컬렉션에서 이 차이가 그대로 드러납니다.
 
@@ -78,7 +93,25 @@ mutable += 2              // MutableCollection.plusAssign → 제자리 변경
 
 **똑같이 생긴 `+=` 두 줄이 완전히 다른 일을 합니다.** 불변 쪽은 매번 리스트를 통째로 복사하니, 루프 안에서 `list += item` 을 돌리면 O(n²) 가 됩니다. 리뷰에서 이 패턴을 보면 지적하세요.
 
-> `val` 로 선언된 `MutableList` 에 `+=` 는 안전하고 빠릅니다. `var List` 에 `+=` 는 매번 복사입니다. 둘을 구분해서 읽는 눈이 필요해요.
+### 판정 축은 `val`/`var` 가 아니라 **선언 타입**이다
+
+여기서 흔히 어긋나는 게 있습니다. "`val` 이면 제자리, `var` 면 복사" 가 아니에요.
+
+```kotlin
+var m = mutableListOf(1)      // 선언 타입이 MutableList
+val alias = m
+m += 2
+println(m === alias)          // true — var 인데도 제자리 변경
+
+var l: List<Int> = listOf(1)  // 선언 타입이 List
+val snapshot = l
+l += 2
+println(l === snapshot)       // false — 새 리스트
+```
+
+위 세 단계 규칙으로 설명됩니다. `MutableList` 에는 `plusAssign`(확장)도 있고 `plus` 도 있지만, `plus` 는 `List<Int>` 를 돌려주므로 `m = m.plus(2)` 가 **타입이 안 맞아 후보에서 탈락**합니다. 남는 건 1번뿐이라 애매성 에러도 안 나고 제자리 변경이 돼요. 반대로 선언 타입이 `List` 면 `plusAssign` 이 애초에 없으니 2번뿐이고, 매번 통째로 복사합니다.
+
+`val mutable` 에 `+=` 가 되는 것도 같은 규칙입니다 — 재대입이 불가능하니 `plus` 경로가 탈락하고 `plusAssign` 만 남죠. 그래서 실무 기준은 이렇게 잡으세요. **`+=` 를 보면 `val`/`var` 가 아니라 왼쪽 변수의 선언 타입을 보세요.** `List` 면 복사, `MutableList` 면 제자리입니다.
 
 ## infix — 점과 괄호를 지운다
 
@@ -170,15 +203,15 @@ infix 는 **두 값 사이의 관계를 표현할 때**(`a to b`, `1 until 10`) 
 
 `Money` 에 연산자를 붙이고, infix 할인 함수와 구조 분해를 구현하세요. `main` 은 그대로 둡니다.
 
-1. **`Money` 의 연산자 3개** — `a + b`(원끼리 더함), `a * 3`(정수배), `a < b`(원 기준 비교)
+1. **`Money` 의 연산자 3개** — `a + b`(원끼리 더함), `a * 3`(정수배), 그리고 **`Comparable<Money>` 를 구현**해 `a < b` 와 `sorted()` 가 둘 다 되게
 2. **`infix fun Money.discount(percent: Int): Money`** — `won * (100 - percent) / 100`
 3. **`Period` 의 구조 분해** — `val (start, end) = Period(1, 31)` 이 되도록
 
 `main` 의 마지막 네 줄은 `+=` 가 불변/가변 컬렉션에서 어떻게 다른지 보여 주는 부분이라 건드리지 않아도 통과합니다.
 
 ```kotlin starter
-class Money(val won: Int) {
-    // TODO 1: plus, times, compareTo 를 operator 로 구현하세요.
+class Money(val won: Int) : Comparable<Money> {
+    // TODO 1: plus, times 를 operator 로, compareTo 를 override 로 구현하세요.
 
     override fun toString(): String = "${won}원"
 }
@@ -197,6 +230,7 @@ fun main() {
     println(a * 3)
     println(a < b)
     println(b discount 20)
+    println(listOf(b, a, a + b).sorted())
 
     val (start, end) = Period(1, 31)
     println("$start~$end")
@@ -218,21 +252,22 @@ fun main() {
 3000원
 true
 2000원
+[1000원, 2500원, 3500원]
 1~31
 immutable: 1 -> 2
 mutable: 2
 ```
 
 ```text hint
-연산자 오버로딩은 **자유가 아니라 규약**입니다. `+` 를 쓰고 싶으면 아무 이름이나 붙이는 게 아니라 **정해진 이름의 함수**에 `operator` 키워드를 붙여야 해요. `a + b`, `a * 3`, `a < b`, `val (x, y) = p` 각각에 대응하는 함수 이름이 무엇이었는지 표를 다시 보세요. 특히 비교는 **네 개의 기호(`<` `>` `<=` `>=`)가 함수 하나**에서 나옵니다.
+연산자 오버로딩은 **자유가 아니라 규약**입니다. `+` 를 쓰고 싶으면 아무 이름이나 붙이는 게 아니라 **정해진 이름의 함수**에 `operator` 키워드를 붙여야 해요. `a + b`, `a * 3`, `a < b`, `val (x, y) = p` 각각에 대응하는 함수 이름이 무엇이었는지 표를 다시 보세요. 특히 비교는 **네 개의 기호(`<` `>` `<=` `>=`)가 함수 하나**에서 나오고, 그 함수를 **인터페이스 계약으로** 올려 두면 `sorted()` 까지 공짜로 따라옵니다 — starter 의 `: Comparable<Money>` 가 그 자리입니다.
 ---
-필요한 이름은 `plus`, `times`, `compareTo`, `component1`, `component2` 다섯입니다. `compareTo` 는 `Int` 를 반환하고, 직접 계산하지 말고 `won.compareTo(other.won)` 처럼 **Int 의 것을 위임**하면 됩니다. `discount` 에는 `infix` 를 붙이는데 조건이 있어요 — **파라미터가 정확히 하나**이고 **멤버이거나 확장 함수**여야 합니다. 여기서는 `Money` 의 확장 함수로 만드세요.
+필요한 이름은 `plus`, `times`, `compareTo`, `component1`, `component2` 다섯입니다. `compareTo` 는 `Int` 를 반환하고, 직접 계산하지 말고 `won.compareTo(other.won)` 처럼 **Int 의 것을 위임**하면 됩니다. 여기서는 `Comparable<Money>` 를 구현하므로 `operator fun` 이 아니라 **`override fun`** 입니다 — 부모 쪽에 이미 `operator` 가 붙어 있어 한 번 더 쓸 필요가 없어요. `discount` 에는 `infix` 를 붙이는데 조건이 있어요 — **파라미터가 정확히 하나**이고 **멤버이거나 확장 함수**여야 합니다. 여기서는 `Money` 의 확장 함수로 만드세요.
 ---
 `a * 3` 에서 왼쪽이 `Money`, 오른쪽이 `Int` 입니다. 그래서 `times` 의 파라미터 타입은 `Money` 가 아니라 `Int` 이고 반환은 `Money` 예요 — **연산자는 양쪽 타입이 같을 필요가 없습니다.** 구조 분해는 이름이 아니라 **순서**로 풀립니다. `val (start, end)` 에서 `start` 는 `component1()`, `end` 는 `component2()` 의 결과이니 `startDay` 를 1번에 놓아야 `1~31` 이 나옵니다. `component1`/`component2` 에도 `operator` 를 빠뜨리면 그냥 평범한 함수가 되어 구조 분해가 안 됩니다.
 ---
 뼈대는 이렇습니다.
 
-`operator fun plus(other: Money) = Money(won + other.won)` / `operator fun times(n: ___) = Money(won * n)` / `operator fun compareTo(other: Money): Int = won.___(other.won)`
+`operator fun plus(other: Money) = Money(won + other.won)` / `operator fun times(n: ___) = Money(won * n)` / `___ fun compareTo(other: Money): Int = won.___(other.won)`
 
 `infix fun Money.discount(percent: Int): Money = Money(won * (100 - ___) / 100)`
 
@@ -240,15 +275,16 @@ mutable: 2
 ```
 
 ```kotlin solution
-class Money(val won: Int) {
-    // operator 키워드가 붙어야 + * < 가 이 함수들로 연결된다.
+// Comparable 을 구현하면 compareTo 하나로 < > <= >= 는 물론 sorted()·범위·maxOrNull 까지 딸려온다.
+class Money(val won: Int) : Comparable<Money> {
+    // operator 키워드가 붙어야 + * 가 이 함수들로 연결된다.
     operator fun plus(other: Money) = Money(won + other.won)
 
     // 양쪽 타입이 같을 필요가 없다 — Money * Int
     operator fun times(n: Int) = Money(won * n)
 
-    // 이 하나로 < > <= >= 네 기호가 전부 동작한다.
-    operator fun compareTo(other: Money): Int = won.compareTo(other.won)
+    // Comparable 의 compareTo 는 이미 operator 로 선언돼 있어 override 만 하면 된다.
+    override fun compareTo(other: Money): Int = won.compareTo(other.won)
 
     override fun toString(): String = "${won}원"
 }
@@ -270,6 +306,7 @@ fun main() {
     println(a * 3)
     println(a < b)
     println(b discount 20)
+    println(listOf(b, a, a + b).sorted())
 
     val (start, end) = Period(1, 31)
     println("$start~$end")

@@ -99,7 +99,7 @@ Java에서 직접 만들거나 Apache Commons(`StringUtils`)를 끌어오던 것
 | `repeat(30)` | 반복 — 구분선 그을 때 |
 | `startsWith` / `endsWith` / `contains` | 포함 검사 |
 | `lines()` | 개행 기준 분리 (`\r\n` 도 처리) |
-| `uppercase()` / `lowercase()` | 대소문자 (`toUpperCase` 는 **deprecated**) |
+| `uppercase()` / `lowercase()` | 대소문자 (`toUpperCase` 는 Kotlin 2.x 에서 **컴파일 에러**) |
 
 `substringBefore` 계열은 **구분자가 없으면 예외 대신 원본을 그대로 돌려줍니다.** `indexOf` 로 -1 검사하던 코드가 통째로 사라지죠. 기본값을 따로 주고 싶으면 두 번째 인자로 넘깁니다.
 
@@ -164,7 +164,7 @@ SQL의 `IN` 절을 만들 때, 로그에 리스트를 찍을 때 거의 매번 �
 | 루프 + `StringBuilder.append` | `joinToString` |
 | `"\\d+"` 같은 이스케이프 범벅 | raw string |
 | `trimIndent()` 없는 `"""` SQL | 쿼리에 공백이 그대로 들어간다 |
-| `toUpperCase()` | deprecated. `uppercase()` |
+| `toUpperCase()` | Kotlin 2.x 에서는 경고가 아니라 **컴파일 에러**다(`DeprecationLevel.ERROR`). `uppercase()` 로 바꿔라 |
 
 ## 연습
 
@@ -238,7 +238,7 @@ true
 
 `fun tags(log: String): String = log.substringAfter("tags=").substringBefore("|").trim().split(",").___(" · ")`
 
-`fun memo(log: String): String = log.substringAfter("memo=").trim().___ { "(없음)" }`
+`fun memo(log: String): String = log.substringAfter("memo=").___ { "(없음)" }`
 
 `receipt` 본문은 `= """` 로 시작해 `주문 ${orderId(log)}` 같은 줄들을 쓰고 `""".trimIndent()` 로 닫습니다.
 ```
@@ -255,7 +255,8 @@ fun tags(log: String): String =
     log.substringAfter("tags=").substringBefore("|").trim().split(",").joinToString(" · ")
 
 // 공백뿐인 입력은 isEmpty 로 안 걸린다. 검증은 거의 항상 isBlank 쪽이다.
-fun memo(log: String): String = log.substringAfter("memo=").trim().ifBlank { "(없음)" }
+// trim() 을 먼저 걸면 함정이 사라진다 — 공백이 지워져 ifEmpty 로도 통과해 버린다.
+fun memo(log: String): String = log.substringAfter("memo=").ifBlank { "(없음)" }
 
 // raw string 은 들여쓰기까지 문자열에 들어가므로 trimIndent() 가 필수다.
 fun receipt(log: String): String = """

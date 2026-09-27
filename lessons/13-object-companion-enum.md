@@ -7,15 +7,32 @@ Kotlin 코드를 열었을 때 Java 개발자가 가장 먼저 "어? 이게 없�
 Java 에서 싱글턴을 제대로 만들려면 `private static volatile` 필드에 이중 검사 락을 걸거나, 그게 싫어서 `enum Singleton { INSTANCE }` 관용구를 썼습니다. `volatile` 하나 빠뜨리면 미묘하게 깨지는 코드였죠. Kotlin 은 그냥:
 
 ```kotlin
-object ConnectionPool {
-    private val conns = mutableListOf<String>()
-    fun borrow(): String = conns.removeLast()
+object OrderIdFormatter {
+    private const val PREFIX = "ORD-"
+    fun format(seq: Long): String = PREFIX + seq.toString().padStart(8, '0')
 }
 
-ConnectionPool.borrow()   // 타입 이름이 곧 인스턴스
+OrderIdFormatter.format(42)   // 타입 이름이 곧 인스턴스
 ```
 
-`object` 선언은 **클래스 정의와 유일한 인스턴스 생성을 동시에** 합니다. 초기화가 JVM 클래스 로딩 규칙을 타기 때문에 **스레드 안전이 언어 차원에서 보장**돼요. 이중 검사 락을 손으로 쓸 일이 없습니다.
+`object` 선언은 **클래스 정의와 유일한 인스턴스 생성을 동시에** 합니다. 이중 검사 락을 손으로 쓸 일이 없습니다.
+
+### "스레드 안전"은 **초기화에만** 해당한다
+
+여기서 반드시 못 박고 갈 게 있습니다. `object` 의 **초기화**는 JVM 클래스 로딩 규칙을 타기 때문에 언어 차원에서 스레드 안전합니다 — 인스턴스가 정확히 한 번만, 안전하게 만들어진다는 뜻이에요. **거기까지입니다.** 그 안에 둔 **가변 상태는 전혀 보호되지 않습니다.**
+
+```kotlin
+object ConnectionPool {
+    private val conns = mutableListOf<String>()      // ✗ 동기화가 없다
+    fun borrow(): String = conns.removeLast()        // 두 스레드가 같이 부르면 깨진다
+}
+
+object Counter { var count = 0 }                     // ✗ count++ 는 원자적이지 않다
+```
+
+`object` 는 **정의상 모든 스레드가 공유하는 단 하나의 객체**입니다. 그래서 그 안의 `var` 나 가변 컬렉션은 "공유 가변 상태"의 교과서적 사례예요. Spring 의 싱글턴 빈에 `var` 필드를 두는 것과 **완전히 같은 코드**고, 같은 방식으로 터집니다.
+
+고르는 길은 셋입니다 — **상태를 없애거나**(위 `OrderIdFormatter` 처럼 입력만 받아 계산해서 돌려주는 것, 제일 좋습니다), `AtomicInteger`·`AtomicLong` 같은 **원자적 타입**을 쓰거나, `ConcurrentHashMap`·`ArrayBlockingQueue` 같은 **동기화된 자료구조**를 쓰는 것(커넥션 풀이면 이쪽)입니다.
 
 일반 클래스가 하는 건 거의 다 합니다 — 인터페이스 구현, 상속, 프로퍼티. 단 **생성자를 가질 수 없습니다.** 아무도 호출할 수 없으니까요.
 
@@ -126,7 +143,17 @@ Level.valueOf("WARN") // 없으면 IllegalArgumentException 을 던진다
 
 `values()` 는 **방어적 복사 때문에 호출마다 배열을 만듭니다.** 루프 안에서 부르면 쓰레기가 쌓여요. `entries` 를 쓰세요.
 
-`valueOf` 는 **예외를 던집니다.** 외부 입력(쿼리 파라미터, 큐 메시지)을 그대로 넣으면 400 이어야 할 상황이 500 이 됩니다. 동반 객체에 `fun fromOrNull(name: String): Level? = try { valueOf(name) } catch (e: IllegalArgumentException) { null }` 같은 안전한 변환을 만들어 두는 게 정석이에요.
+`valueOf` 는 **예외를 던집니다.** 외부 입력(쿼리 파라미터, 큐 메시지)을 그대로 넣으면 400 이어야 할 상황이 500 이 됩니다. 그래서 안전한 변환을 하나 만들어 두는 게 정석인데, **방금 배운 `entries` 로 쓰는 게 1안**입니다.
+
+```kotlin
+// 1안 — 예외를 아예 만들지 않는다
+fun fromOrNull(name: String): Level? = Level.entries.find { it.name == name }
+
+// 2안 — try/catch. 제네릭 안에서 enumValueOf<T>() 밖에 못 쓸 때의 대안
+fun fromOrNull2(name: String): Level? = try { Level.valueOf(name) } catch (e: IllegalArgumentException) { null }
+```
+
+둘 다 결과는 같지만 **1안은 예외를 만들지 않습니다.** 예외 생성에는 스택 트레이스를 채우는 비용이 붙고, 잘못된 입력이 쏟아지는 엔드포인트라면 그 비용이 그대로 드러나요. 무엇보다 **예외는 예외적인 상황에 쓰는 것**이지 "못 찾음"이라는 정상적인 분기를 표현하는 도구가 아닙니다. 제네릭 함수 안에서처럼 `enumValueOf<T>()` 밖에 못 쓰는 자리라면 그때 2안으로 갑니다.
 
 ### when 과의 결합
 
@@ -166,11 +193,16 @@ fun String?.isBlankOrNull() = this.isNullOrBlank()   // object 유틸보다 이�
 
 `const val` 이 스무 줄씩 쌓여 있으면 "설정이 코드에 박혀 있다"는 신호입니다. 진짜 클래스 불변식이면 남기고, 운영 중 바뀔 값이면 설정(`@ConfigurationProperties`)으로 빼라고 지적하세요. 여러 클래스가 공유하는 상수라면 동반 객체가 아니라 **최상위 `const val`** 이 맞습니다.
 
+**3. `object` 안의 `var` — 공유 가변 상태**
+
+`object RequestCounter { var count = 0 }` 도, `@Service class OrderService { var lastOrderId: Long = 0 }` 도 똑같습니다. 리뷰에서 이렇게 씁니다 — **"`object`(그리고 싱글턴 빈) 안의 `var` 는 모든 요청 스레드가 공유하는 가변 상태입니다. `count++` 는 원자적이지 않아 값이 샙니다. `AtomicInteger` 로 바꾸거나, 상태를 호출자에게 돌려주는 무상태 설계로 가세요."** 실제로 Spring 에서 "가끔 다른 사용자 값이 보인다"는 버그의 상당수가 이 모양입니다.
+
 ## 연습
 로그 레벨을 다루는 코드를 완성하세요. `main` 은 그대로 두고 위쪽만 채우면 됩니다.
 
 1. **`enum class Level`** — 생성자 프로퍼티 `code: Int` (`INFO`=1, `WARN`=2, `ERROR`=3), 추상 메서드 `tag(): String` 을 상수마다 오버라이드해 `"[INFO]"` / `"[WARN]"` / `"[ERROR]"` 를 반환
 2. **`object Recorder`** — 싱글턴. `var count: Int` 를 0으로 시작하고, `record(level, message)` 가 `count` 를 1 늘린 뒤 `"[TAG] message"` 형태 문자열을 반환
+   (싱글턴에 `var` 를 두는 건 **학습용 단일 스레드 예제**입니다. 실제 서비스라면 위 리뷰 절에서처럼 `AtomicInteger` 나 무상태 설계로 갑니다.)
 3. **`class Log` 의 `companion object`** — `of(raw: String): Log?` 가 `"ERROR:db down"` 형태를 파싱. 콜론이 없거나 레벨 이름이 없는 값이면 `null`
 4. **`object` 식** — `Formatter` 와 `Named` 를 **동시에** 구현하는 익명 객체
 
@@ -186,6 +218,7 @@ interface Named {
 // TODO 1: enum class Level — code 프로퍼티 + 상수별 tag() 오버라이드
 
 // TODO 2: object Recorder — var count, fun record(level: Level, message: String): String
+//         (학습용 단일 스레드. 싱글턴의 var 는 실무에선 공유 가변 상태다)
 
 class Log(val level: Level, val message: String) {
     // TODO 3: companion object — fun of(raw: String): Log?
@@ -260,6 +293,7 @@ enum class Level(val code: Int) {
 }
 
 // object 선언 = 싱글턴. count 가 호출 간에 공유된다.
+// 학습용 단일 스레드라 var 로 둔다 — 멀티스레드라면 AtomicInteger 거나 애초에 무상태여야 한다.
 object Recorder {
     var count = 0
 
@@ -270,7 +304,8 @@ object Recorder {
 }
 
 class Log(val level: Level, val message: String) {
-    // static 팩토리 자리. valueOf 가 던지는 예외를 여기서 삼켜 null 로 바꾼다.
+    // static 팩토리 자리. 이론의 1안은 entries.find 지만, 여기서는 valueOf 가
+    // 던지는 예외를 직접 받아 null 로 바꾸는 2안을 연습한다.
     companion object {
         fun of(raw: String): Log? {
             val idx = raw.indexOf(':')

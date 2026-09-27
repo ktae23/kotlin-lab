@@ -171,7 +171,8 @@ class PaymentDeclined(val reason: String) : OrderException("payment declined: $r
 설정 파일을 읽는 작은 로더를 완성하세요. 세 가지를 씁니다 — **`use { }`**, **`?: throw`**, **식으로서의 `try`**.
 
 - `load` — `Config`를 `use`로 열어 `"key=value"` 줄을 `Map`으로 만든다. 블록을 벗어나면 `close()`가 호출되어야 한다.
-- `parsePort` — `raw`가 null이면 `ConfigException("missing: port")`을 던지고, 숫자가 아니면 `fallback`을 반환한다. **`if` 없이** `?:` 와 식 `try`로 작성한다.
+- `parsePort` — `raw`가 null이면 `ConfigException("missing: $key")`를 던지고, 숫자가 아니면 `fallback`을 반환한다. **`if` 없이** `?:` 와 식 `try`로 작성한다.
+  - `key` 는 **어떤 설정 키를 읽으려 했는지**를 받는 파라미터입니다(기본값 `"port"`). 메시지에 `"port"` 를 하드코딩하면 `host` 를 읽다 실패했을 때 **엉뚱한 키를 원인으로 보고**하게 됩니다 — 장애 조사에서 제일 많이 시간을 잡아먹는 종류의 거짓말이에요.
 
 ```kotlin starter
 class ConfigException(message: String) : RuntimeException(message)
@@ -185,8 +186,8 @@ fun load(config: Config): Map<String, String> {
     TODO("use { } 로 열고 key=value 를 Map 으로")
 }
 
-fun parsePort(raw: String?, fallback: Int): Int {
-    TODO("?: throw 와 식으로서의 try")
+fun parsePort(raw: String?, fallback: Int, key: String = "port"): Int {
+    TODO("?: throw 와 식으로서의 try. 메시지에 key 를 넣을 것")
 }
 
 fun main() {
@@ -198,7 +199,7 @@ fun main() {
     println(parsePort(bad["port"], 80))
 
     val result = try {
-        parsePort(bad["host"], 80)
+        parsePort(bad["host"], 80, "host")
     } catch (e: ConfigException) {
         "caught: ${e.message}"
     }
@@ -212,7 +213,7 @@ closed: app.conf
 8080
 closed: bad.conf
 80
-caught: missing: port
+caught: missing: host
 ```
 
 ```text hint
@@ -220,13 +221,13 @@ caught: missing: port
 ---
 `"port=8080"` 을 쪼개는 건 `split("=", limit = 2)` 입니다. `limit = 2` 를 주는 이유를 생각해 보세요 — 값 안에 `=` 가 또 있으면 어떻게 될까요? 쪼갠 리스트를 `Map` 으로 모을 땐 `associate { }` 에 `Pair` 를 넘기면 됩니다 (`k to v`). 구조 분해 `val (k, v) = ...` 도 쓸 수 있어요.
 ---
-`parsePort` 는 두 단계입니다. (1) null 이면 던진다 — `?:` 오른쪽에 `throw` 를 둘 수 있는 건 `throw` 가 `Nothing` 타입의 **식**이기 때문입니다. (2) 숫자 변환 실패는 기본값 — `try { ... } catch (e: NumberFormatException) { fallback }` 자체가 값이니 그대로 `return` 하세요. `toIntOrNull()` 을 쓰면 편하지만, 이번 연습은 **식 `try` 를 손에 익히는 게 목적**이라 `toInt()` 로 가세요.
+`parsePort` 는 두 단계입니다. (1) null 이면 던진다 — `?:` 오른쪽에 `throw` 를 둘 수 있는 건 `throw` 가 `Nothing` 타입의 **식**이기 때문입니다. 이때 메시지는 `"missing: port"` 가 아니라 `"missing: $key"` 입니다. 실패한 키를 그대로 담아야 로그가 거짓말을 안 해요. (2) 숫자 변환 실패는 기본값 — `try { ... } catch (e: NumberFormatException) { fallback }` 자체가 값이니 그대로 `return` 하세요. `toIntOrNull()` 을 쓰면 편하지만, 이번 연습은 **식 `try` 를 손에 익히는 게 목적**이라 `toInt()` 로 가세요.
 ---
 뼈대입니다. 빈칸만 채우면 됩니다.
 
 `load`: `return config.use { c -> c.read().associate { val (k, v) = it.split("=", limit = ___); k to v } }`
 
-`parsePort`: `val text = raw ?: throw ___` 다음 줄에 `return try { text.___() } catch (e: NumberFormatException) { ___ }`
+`parsePort`: 시그니처는 `fun parsePort(raw: String?, fallback: Int, key: String = "port"): Int` 입니다. `val text = raw ?: throw ___` 다음 줄에 `return try { text.___() } catch (e: NumberFormatException) { ___ }`
 ```
 
 ```kotlin solution
@@ -246,9 +247,10 @@ fun load(config: Config): Map<String, String> =
         }
     }
 
-fun parsePort(raw: String?, fallback: Int): Int {
+fun parsePort(raw: String?, fallback: Int, key: String = "port"): Int {
     // throw 는 Nothing 타입의 식이라 ?: 오른쪽에 올 수 있다.
-    val text = raw ?: throw ConfigException("missing: port")
+    // 메시지에 "port" 를 박으면 host 를 읽다 실패해도 port 탓이라고 보고한다. 키를 받아서 넣는다.
+    val text = raw ?: throw ConfigException("missing: $key")
     return try {
         text.toInt()
     } catch (e: NumberFormatException) {
@@ -265,7 +267,7 @@ fun main() {
     println(parsePort(bad["port"], 80))
 
     val result = try {
-        parsePort(bad["host"], 80)
+        parsePort(bad["host"], 80, "host")
     } catch (e: ConfigException) {
         "caught: ${e.message}"
     }

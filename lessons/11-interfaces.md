@@ -79,8 +79,11 @@ class Bilingual : Greeter, Farewell {
 상속 관계에 괄호가 있는지로 구분되는 것도 기억하세요.
 
 ```kotlin
-class A : Policy("이름"), Greeter, Farewell   // 괄호 있는 게 클래스, 없는 게 인터페이스
+// Auditable, Traceable 은 겹치는 멤버가 없는 인터페이스라고 하자
+class A : Policy("이름"), Auditable, Traceable   // 괄호 있는 게 클래스, 없는 게 인터페이스
 ```
+
+괄호가 붙은 건 **딱 하나**이고, 그게 부모 클래스입니다. 나머지는 인터페이스예요. 참고로 위 자리에 앞 절의 `Greeter`, `Farewell` 을 나란히 놓으면 `greet()` 기본 구현이 겹쳐 **`error: class 'A' must override 'greet'`** 가 납니다 — 목록이 길어질수록 `super<T>` 로 풀어야 할 충돌이 숨어 있는지 봐야 합니다.
 
 ## `fun interface` — SAM 변환
 

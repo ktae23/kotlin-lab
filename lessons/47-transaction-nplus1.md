@@ -20,15 +20,15 @@ Spring의 `@Transactional`은 **프록시 AOP**로 동작합니다. 빈을 감�
 }
 ```
 
-CGLIB 프록시는 대상 클래스를 **상속**해서 만듭니다. `final`이면 상속이 안 되죠. Java에서는 겪을 일이 없던 문제가 Kotlin에서는 기본값입니다. 해결은 Lesson 19에서 본 그 플러그인이에요.
+CGLIB 프록시는 대상 클래스를 **상속**해서 만듭니다. `final`이면 상속이 안 되죠. Java에서는 겪을 일이 없던 문제가 Kotlin에서는 기본값입니다. 해결은 L42 에서 본 그 플러그인이에요.
 
 ```kotlin
-plugins { kotlin("plugin.spring") version "1.9.25" }   // allOpen 프리셋
+plugins { kotlin("plugin.spring") version "2.0.21" }   // allOpen 프리셋
 ```
 
 `plugin.spring`은 `@Component`, `@Service`, `@Repository`, `@Controller`, `@Configuration`, **`@Transactional`**, `@Async`가 붙은 클래스를 바이트코드 레벨에서 `open`으로 바꿔줍니다. Spring Initializr로 만들면 기본 포함이라 대부분 모르고 지나가요. **직접 build.gradle을 쓰거나 커스텀 애노테이션을 만들면 빠집니다** — 그땐 `allOpen { annotation("com.example.MyTxService") }` 로 직접 등록해야 합니다.
 
-### (2) private / internal 메서드
+### (2) private 메서드 — 그리고 `internal` 에 대한 오해
 
 ```kotlin
 @Service class OrderService {
@@ -36,7 +36,11 @@ plugins { kotlin("plugin.spring") version "1.9.25" }   // allOpen 프리셋
 }
 ```
 
-프록시는 **public 메서드만** 오버라이드합니다. `private`은 물론이고 Kotlin의 `internal`도 위험해요. `internal fun`은 바이트코드에서 `doWork$module_name`처럼 **맹글링(mangling)** 되면서 `public`으로 컴파일되는데, 프록시 시그니처와 어긋나 동작이 예측 불가해집니다. **트랜잭션 경계 메서드는 반드시 `public`.**
+`private` 메서드는 서브클래스에서 오버라이드할 수 없으니 CGLIB 프록시가 가로챌 길이 없습니다. 트랜잭션은 그냥 안 걸려요.
+
+**그런데 "public 메서드만 된다" 는 건 지금은 틀린 말입니다.** Spring Framework 문서에 이렇게 적혀 있어요 — *"As of 6.0, `protected` or package-visible methods can also be made transactional for class-based proxies by default."* Boot 3.3 이 쓰는 Framework 는 6.1 이므로 **`protected`·package-private 메서드에도 트랜잭션이 걸립니다.** 여전히 안 되는 건 **`private`** 과 **인터페이스 기반 JDK 프록시**(인터페이스에 없는 메서드는 프록시에 아예 존재하지 않죠)뿐입니다.
+
+`internal` 은 어떨까요. "맹글링되니 예측 불가" 라는 말을 자주 듣는데 **실제로는 가로채집니다.** `internal fun doWork()` 는 바이트코드에서 `public final doWork$모듈명` 으로 나가므로, 열려만 있으면 프록시가 오버라이드할 수 있어요. 진짜 리스크는 둘입니다 — **(a)** 기본이 `final` 이라 allOpen 이 그 멤버까지 열어줘야 하고, **(b)** 맹글링된 이름이 `public` 으로 노출돼 Kotlin 에서 숨긴 것이 Java 쪽에서는 호출 가능해집니다. 그래도 **트랜잭션 경계 메서드는 `public` 으로 두는 쪽이 가장 덜 놀랍습니다.**
 
 ### (3) self-invocation — 가장 많이 당하는 것
 
@@ -52,7 +56,14 @@ class OrderService(private val repo: OrderRepository) {
 
 `placeOrders` 안의 `save(it)`은 **프록시가 아니라 진짜 객체(`this`)의 메서드 호출**입니다. 프록시를 안 거치니 트랜잭션이 안 열려요. Java에도 있는 함정이지만 Kotlin은 `this.`를 생략하는 스타일이 흔해 눈에 덜 띕니다. 해결은 **클래스 분리**(가장 깔끔), 자기 자신 주입(`@Lazy private val self: OrderService`, 동작은 하지만 냄새가 납니다), `TransactionTemplate` 직접 사용 순입니다.
 
-> **면접 빈출** — "`@Transactional`이 동작하지 않는 경우를 말해보세요." 표준 답: ① private/protected 메서드 ② 같은 클래스 내부 호출(self-invocation) ③ 예외를 잡아먹어 롤백이 안 되는 경우 ④ `RuntimeException`이 아닌 checked exception (기본은 롤백 안 함). **Kotlin이면 여기에 ⑤ allOpen 미적용으로 final 클래스 → CGLIB 프록시 생성 불가**를 추가하세요. 이거 하나로 "Kotlin 실무 해봤구나"가 전달됩니다.
+> **면접 빈출** — "`@Transactional`이 동작하지 않는 경우를 말해보세요." 목록으로 외워 두세요.
+> ① **`private` 메서드** (Framework 6.0 부터 `protected`·package-private 는 **됩니다** — 여기서 정확하면 점수가 붙습니다)
+> ② 같은 클래스 내부 호출(self-invocation)
+> ③ 예외를 `catch` 로 삼켜 롤백 판단 자체가 일어나지 않는 경우
+> ④ 기본 롤백 대상은 **`RuntimeException` 과 `Error` 뿐** — 그 밖의 예외는 빠져나가도 커밋됩니다
+> ⑤ **빈이 아닌 객체** — 직접 `new` 한 인스턴스에는 프록시가 없습니다
+> ⑥ **다른 스레드에서 호출** — 트랜잭션 컨텍스트는 스레드 로컬이라 따라가지 않습니다
+> **Kotlin이면 여기에 ⑦ allOpen 미적용 → `final` 클래스라 CGLIB 프록시 생성 실패(기동 실패), 열린 클래스의 `final` 메서드는 조용한 무시**를 추가하세요. 이거 하나로 "Kotlin 실무 해봤구나"가 전달됩니다.
 
 ### (4) 예외와 롤백
 
@@ -64,7 +75,17 @@ fun register(cmd: RegisterCommand) {
 }
 ```
 
-Kotlin에는 checked exception이 없어 `throws` 선언이 사라집니다. 그만큼 **"이 메서드가 뭘 던지는지"가 안 보여요.** 트랜잭션 메서드에서 `catch`로 예외를 삼키면 조용히 커밋됩니다. 잡았으면 **다시 던지거나** `TransactionAspectSupport.currentTransactionStatus().setRollbackOnly()`를 부르세요.
+여기서 Kotlin 이 **위험을 키우는** 지점이 하나 있습니다. 방향을 헷갈리지 마세요.
+
+Spring 의 기본 롤백 규칙은 "checked 냐 unchecked 냐" 가 아니라 **`RuntimeException` 이거나 `Error` 인가**입니다. `IOException` 같은 그 밖의 예외가 트랜잭션 메서드를 빠져나가면 **롤백 없이 커밋**돼요. Java 에서는 그런 예외를 던지려면 `throws IOException` 을 시그니처에 적어야 했으니 최소한 눈에는 보였습니다. **Kotlin 에는 checked exception 이 없어서 `IOException` 을 아무 선언 없이 던질 수 있습니다.** 위험이 사라진 게 아니라 **표지판이 사라진 겁니다.**
+
+```kotlin
+// 파일·네트워크 I/O 가 섞인 트랜잭션이라면 명시하세요
+@Transactional(rollbackFor = [Exception::class])
+fun importFile(path: String) { ... }   // IOException 이 나가도 롤백된다
+```
+
+그리고 `catch` 로 예외를 삼키면 애초에 롤백 판단이 일어나지 않습니다. 잡았으면 **다시 던지거나** `TransactionAspectSupport.currentTransactionStatus().setRollbackOnly()`를 부르세요.
 
 ### (5) 읽기 전용 트랜잭션
 
@@ -145,9 +166,25 @@ val orders: MutableList<Order> = mutableListOf()
 
 커넥션을 응답 끝까지 쥐고 있다는 게 핵심입니다. API가 외부 호출이라도 하면 그 시간 내내 커넥션이 묶여요. 트래픽이 늘면 풀이 마르고 **전체 API가 같이 죽습니다.**
 
-`spring.jpa.open-in-view: false` 로 끄면 — **서비스 계층 안에서 필요한 걸 다 로딩해 DTO로 변환해 내보내야 합니다.** 불편한 게 아니라 원래 그래야 하는 거예요. Lesson 19·20의 "엔티티는 안, DTO는 밖" 경계가 이 순간 **강제**됩니다. 끄면 그동안 숨어 있던 LAZY 접근이 전부 예외로 드러나는데, 그게 바로 고쳐야 할 목록입니다.
+`spring.jpa.open-in-view: false` 로 끄면 — **서비스 계층 안에서 필요한 걸 다 로딩해 DTO로 변환해 내보내야 합니다.** 불편한 게 아니라 원래 그래야 하는 거예요. L45·L46 의 "엔티티는 안, DTO는 밖" 경계가 이 순간 **강제**됩니다. 끄면 그동안 숨어 있던 LAZY 접근이 전부 예외로 드러나는데, 그게 바로 고쳐야 할 목록입니다.
 
 > 새 프로젝트라면 **처음부터 `open-in-view: false`로 시작하세요.** 나중에 끄는 건 훨씬 아픕니다.
+
+## 리뷰할 때 보는 것
+
+이 레슨의 결함은 **전부 조용합니다.** 컴파일도 되고 테스트도 통과하는 코드라서, 리뷰에서 못 잡으면 운영에서 잡힙니다.
+
+| 코드에서 보이면 | 이렇게 지적한다 |
+|---|---|
+| `@Transactional` 이 `private` 메서드에 붙어 있다 | 프록시가 가로챌 수 없어 애노테이션이 주석과 같다. `public` 으로 올리거나 클래스를 분리하라 (`protected`·package-private 는 Framework 6.0 부터 동작한다) |
+| 같은 클래스 안에서 `@Transactional` 메서드를 직접 호출한다 | 프록시를 거치지 않아 트랜잭션이 열리지 않는다. 해당 메서드를 별도 빈으로 분리하라 |
+| 트랜잭션 메서드가 `catch` 로 예외를 로그만 찍고 삼킨다 | 롤백 없이 커밋된다. 다시 던지거나 `setRollbackOnly()` 를 호출하라 |
+| 트랜잭션 메서드가 `IOException` 계열을 던질 수 있다 | 기본 롤백 대상은 `RuntimeException`/`Error` 뿐이다. `@Transactional(rollbackFor = [Exception::class])` 을 명시하라 |
+| 조회 전용 서비스에 `readOnly` 가 없다 | 클래스에 `@Transactional(readOnly = true)` 를 걸고 쓰기 메서드만 덮어써라. 더티 체킹 스냅샷이 사라지고 실수로 인한 UPDATE 도 막힌다 |
+| 루프나 `map` 안에서 연관 엔티티를 건드린다 | N+1 이다. 루프 밖에서 id 를 모아 한 번에 조회하거나 fetch join / `@EntityGraph` 로 함께 가져와라 |
+| 컬렉션 fetch join 에 `Pageable` 이 함께 있다 | `HHH000104` — 전체를 메모리에 올린 뒤 잘라내므로 데이터가 커지면 OOM 이다. `@BatchSize` 나 `default_batch_fetch_size` 로 바꿔라 |
+| 연관관계에 `fetch = FetchType.EAGER` | 전부 `LAZY` 로 두고 필요한 곳에서만 함께 가져와라. EAGER 는 N+1 을 막지 못하면서 필요 없는 쿼리까지 항상 낸다 |
+| 컨트롤러·뷰에서 LAZY 연관을 건드린다 | OSIV 에 기대고 있다. 커넥션을 응답 끝까지 점유하는 구조다. 서비스 안에서 DTO 로 변환해 내보내고 `open-in-view: false` 로 가라 |
 
 ## 연습
 

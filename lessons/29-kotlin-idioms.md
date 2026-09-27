@@ -27,12 +27,14 @@ val safe = order ?: throw IllegalArgumentException("주문 없음"); process(saf
 ```
 > "`?:` 로 early throw 하면 아래 전체가 non-null 타입으로 좁혀져서 `?.` 가 더 안 나옵니다."
 
-**4. `!!` 남용 → 설계 수정** — `!!` 는 "null 안정성을 포기한다"는 선언이다.
+**4. `!!` 남용 → 설계 수정** — `!!` 는 "null 안정성을 포기한다"는 선언이다. 고치는 방향은 **"null 이 정상인가"** 로 갈린다.
 ```kotlin
-val total = cart!!.items!!.sumOf { it.price }              // Before
-val total = cart?.items?.sumOf { it.price } ?: 0           // After
+val total = cart!!.items!!.sumOf { it.price }                          // Before
+val total = cart?.items?.sumOf { it.price } ?: 0                       // (a) 없는 게 정상이면 기본값
+val total = requireNotNull(cart) { "결제 단계인데 cart 없음: $userId" }   // (b) 버그면 원인을 남기고 멈춘다
+    .items.sumOf { it.price }
 ```
-> "`!!` 는 코드 문제가 아니라 설계 신호입니다. 이 값이 정말 null일 수 있나요? 아니면 타입을 non-null로 바꾸죠."
+> "이 값이 정말 null일 수 있나요? 정상이면 `?: 기본값`, 버그면 `requireNotNull(x) { 왜 있어야 하는지 }` 입니다. **`?: 0` 을 반사적으로 붙이면 버그가 정상 매출 0원으로 위장돼서** `!!` 보다 조사하기 어려워집니다 (L28)."
 
 ## B. 분기 — if-else 체인의 수명
 
@@ -131,13 +133,16 @@ data class Money(val amount: Long)                                              
 ```
 > "값 객체면 `data class` 로 충분합니다. 손으로 쓴 equals는 필드 추가 때 반드시 빠져요."
 
-**18. 가변 컬렉션 노출 → 읽기 전용 타입으로 반환**
+**18. 가변 컬렉션 노출 → 읽기 전용 타입 + 필요하면 스냅샷** — 두 단계다.
 ```kotlin
-class Cart { val items = mutableListOf<Item>() }                        // Before — 밖에서 add 가능
+class Cart { val items = mutableListOf<Item>() }                    // Before — 밖에서 add 가능
 class Cart { private val _items = mutableListOf<Item>()
-             val items: List<Item> get() = _items }                      // After
+             val items: List<Item> get() = _items }                  // 1단계 — 실수 방지
+             // val items: List<Item> get() = _items.toList()        // 2단계 — 스냅샷
 ```
-> "`MutableList` 를 그대로 노출하면 캡슐화가 뚫립니다. 반환 타입을 `List` 로 좁혀주세요."
+1단계로 막히는 건 **`add` 를 실수로 부르는 것뿐**입니다. 런타임 객체는 여전히 `ArrayList` 라 `(cart.items as MutableList).add(...)` 가 컴파일되고 실행까지 되고, 돌려준 `List` 는 내부를 가리키는 **살아있는 참조**라 내가 `_items.clear()` 하면 호출자 목록도 같이 비어요 (L23). 2단계 `toList()` 는 둘 다 막는 대신 **접근마다 복사 비용**을 냅니다. 팀 내부 도메인 객체면 1단계로 충분하고, **공개 API·동시성 경계**면 2단계입니다.
+
+> "반환 타입이 `MutableList` 인 건 무조건 `List` 로 좁혀주세요. 그 위에, 이 목록을 받은 쪽이 나중에 우리 내부 상태 변화를 보게 되면 곤란하다면 `get() = _items.toList()` 로 스냅샷을 주세요 — 읽기 전용 타입은 불변이 아닙니다."
 
 ## E. 문자열
 
@@ -173,12 +178,14 @@ fun run(onDone: (String) -> Unit)                                  // After
 
 ## G. 스코프 함수와 초기화 — 오용 구역
 
-**23. 스코프 함수 오용** — 5개를 다 외울 필요는 없고 **`let`(변환) / `apply`(설정) / `also`(부수효과)** 셋이면 실무의 9할이다.
+**23. 스코프 함수 오용** — 5개를 다 외울 필요는 없고 **`let`(변환) / `apply`(설정) / `also`(부수효과)** 셋이면 실무의 9할이다. 단 **`apply` 가 첫 선택지인 경우는 드물다.**
 ```kotlin
-val u = User(); u.name = "kim"; u.age = 20; save(u)     // Before
-val u = User().apply { name = "kim"; age = 20 }; save(u) // After
+val u = User(); u.name = "kim"; u.age = 20; save(u)      // Before
+val u = User().apply { name = "kim"; age = 20 }; save(u) // ❌ User 에 var 가 있어야 성립한다
+val u = User(name = "kim", age = 20); save(u)            // After — 기본 인자 + val
 ```
-> "`apply` 는 객체 설정, `let` 은 값 변환, `also` 는 로깅 같은 부수효과입니다. 중첩해서 `it` 이 두 겹 되면 그냥 이름 붙인 변수를 쓰세요."
+`apply { name = ... }` 가 동작한다는 건 **`User` 의 프로퍼티가 `var` 라는 뜻**이고, 그러면 15번(빌더 → 기본 인자)과 L30 의 "불변을 기본값으로"를 정면으로 어깁니다. `apply` 가 맞는 자리는 **생성자로 설정할 수 없는 객체** — Java 빌더, 프레임워크가 만들어 주는 객체(`HttpHeaders`, `RestTemplate`), `StringBuilder` 입니다.
+> "`apply` 로 설정하는 프로퍼티가 `var` 여야 한다는 것 자체가 신호입니다. 생성자에서 받을 수 있으면 `User(name = ..., age = ...)` 로 바꾸고 `val` 로 닫으세요. `apply` 는 내가 생성자를 못 고치는 객체용입니다."
 
 **24. `lateinit` 남용 → 생성자 주입 / `by lazy`**
 ```kotlin

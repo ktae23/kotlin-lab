@@ -86,7 +86,7 @@ inline 함수의 람다 파라미터에는 제약이 따라붙습니다. 그걸 
 
 ```kotlin
 // 람다를 변수에 담거나 다른 곳으로 넘겨야 하면 → noinline
-inline fun run(before: () -> Unit, noinline after: () -> Unit) {
+inline fun execute(before: () -> Unit, noinline after: () -> Unit) {
     before()
     register(after)   // 객체로 저장해야 하므로 인라인 불가
 }
@@ -138,6 +138,21 @@ fun interface DiscountPolicy {   // Java 에서 람다로 쓸 수 있다
 ```
 
 > 면접에서 자주 나옵니다: **"Kotlin 람다는 항상 객체를 만드나요?"** → 아니오. `inline` 함수에 넘기면 객체가 생기지 않고, 캡처가 없는 람다는 싱글턴으로 재사용됩니다. 이걸 모르면 "Kotlin은 람다 때문에 느리다"는 근거 없는 말을 하게 됩니다.
+
+## 리뷰할 때 보는 것
+
+| 코드에서 보이면 | 이렇게 지적한다 |
+|---|---|
+| 람다가 3줄을 넘는데 여전히 `it` | 파라미터에 이름을 붙여라. `it` 은 한 줄짜리 변환에만 쓴다 |
+| `it` 안에 `it` (중첩 람다) | 최소한 바깥쪽에 이름을 붙여라. 지금은 읽는 사람이 어느 `it` 인지 세어야 한다 |
+| 본문이 긴 함수에 `inline` | 호출 지점마다 바이트코드가 복사된다. `inline` 은 **람다를 받는 짧은 함수**에만 |
+| 람다 파라미터가 없는데 `inline` | 얻는 게 없다. IDE 경고가 이미 떠 있을 것이다 |
+| 람다를 다른 스레드·콜백으로 넘기는 `inline` 함수에 `crossinline` 없음 | 함수가 끝난 뒤에 `return` 이 실행될 수 있다. `crossinline` 을 붙여 non-local return 을 막아라 |
+| `inline` 함수가 람다를 필드나 컬렉션에 저장 | 그 파라미터에 `noinline` 이 필요하다 |
+| `{ f(it) }` | 함수 참조 `::f` 로. 람다 한 겹이 사라진다 |
+| `{ it.amount }` | 프로퍼티 참조 `Order::amount` 가 있다 |
+| 콜백 하나 받자고 선언한 인터페이스 | 함수 타입 `(T) -> R` 로 충분하다 (L11) |
+| Java 에서 호출할 API 의 파라미터가 함수 타입 | Java 쪽에서 `Function1.invoke(...)` 가 된다. `fun interface` 로 선언하라 |
 
 ## 연습
 

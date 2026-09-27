@@ -55,8 +55,13 @@ class OrderService { ... }
 
 그래서 `kotlin("plugin.spring")`(내부적으로 **allOpen** 플러그인)이 `@Component`, `@Service`, `@Repository`, `@Controller`, `@Configuration`, `@Transactional` 이 붙은 클래스와 그 멤버 함수에 **컴파일 시점에 `open`을 자동으로 붙여줍니다.** 소스코드는 그대로 두고 바이트코드만 열어주는 겁니다.
 
-> ⚠️ **이게 실무에서 터지는 방식**
-> Boot 2 시절엔 기동 시 `Cannot subclass final class` 로 예외가 났습니다. 지금은 상황에 따라 **더 나쁩니다** — 프록시가 안 걸린 원본 빈이 그대로 주입되고, 애플리케이션은 멀쩡히 뜨고, **`@Transactional`이 조용히 아무 일도 안 합니다.** 롤백이 안 되는 걸 운영 데이터 깨진 다음에 발견하게 돼요. 새 프로젝트 만들면 `plugin.spring` 이 있는지부터 확인하세요.
+> ⚠️ **터지는 방식은 두 가지고, 위험한 쪽은 조용한 쪽입니다**
+>
+> **① final 클래스 → 기동 실패(즉시 발각).** Spring AOP 는 `CglibAopProxy` 로 대상 클래스를 상속하려 하고, 대상이 `final` 이면 거기서 `AopConfigException: Could not generate CGLIB subclass of <클래스>: Common causes of this problem include using a final class or a non-visible class` 를 **던집니다.** 빈 초기화 중에 던지는 예외라 애플리케이션이 **기동조차 못 합니다.** Boot 는 `spring.aop.proxy-target-class=true` 가 기본이라 "인터페이스를 뽑아 JDK 프록시로 피하자" 도 통하지 않아요. 아프지만 배포 전에 걸리는 실패입니다.
+>
+> **② 열린 클래스의 `final` 메서드 → 조용한 무시(진짜 위험).** 클래스는 `open` 인데 메서드에 `open` 이 없으면 CGLIB 은 그 메서드만 **오버라이드하지 못하고 그냥 넘어갑니다.** 예외도 경고도 없고 info/debug 레벨 로그 한 줄이 남을 뿐이에요. 애플리케이션은 멀쩡히 뜨고, 그 메서드의 `@Transactional` 은 **아무 일도 안 합니다.** 롤백이 안 되는 걸 운영 데이터가 깨진 다음에 발견하게 되죠.
+>
+> 그래서 **"앱이 떴으니 allOpen 은 있는 거네"** 는 절반만 맞는 추론입니다. 클래스가 열렸는지는 기동 여부가 답해 주지만, **메서드까지 열렸는지는 아무도 알려주지 않습니다.** `plugin.spring` 은 클래스와 멤버 함수를 함께 열어주니, 새 프로젝트를 만들면 이 플러그인이 있는지부터 확인하세요.
 
 참고로 `@Transactional`이 **같은 클래스 내부 호출(self-invocation)에서 안 먹는** 것은 Java에서도 동일한 프록시의 한계입니다. Kotlin에서 새로 생긴 함정은 아니지만, "안 먹는다"는 증상이 같아서 원인을 헷갈리기 쉽습니다. **플러그인 확인 → self-invocation 확인** 순서로 보세요.
 
@@ -82,7 +87,7 @@ class Order(
 
 ## 3. `-Xjsr305=strict` — Spring의 @Nullable 을 타입으로 받기
 
-Lesson 1에서 본 **플랫폼 타입** 기억하시죠. Kotlin이 Java 메서드를 호출하면 반환 타입이 `String!`이 되고 **null 검사를 안 합니다.**
+L08 에서 본 **플랫폼 타입** 기억하시죠. Kotlin이 Java 메서드를 호출하면 반환 타입이 `String!`이 되고 **null 검사를 안 합니다.**
 
 Spring 프레임워크는 그래서 API 전반에 JSR-305 기반 `@Nullable` / `@NonNullApi` 를 붙여놨습니다. `-Xjsr305=strict`는 **그 애노테이션을 Kotlin 타입 시스템이 진지하게 받아들이게** 하는 스위치입니다.
 
@@ -92,7 +97,7 @@ Spring 프레임워크는 그래서 API 전반에 JSR-305 기반 `@Nullable` / `
 val value = redisTemplate.opsForValue().get("key")
 ```
 
-Spring Data의 `findById()`가 `Optional<T>`를, `CrudRepository`의 커스텀 메서드가 `T?`를 정확히 돌려주는 것도 이 덕분입니다. **새 프로젝트면 무조건 켜세요.** 레거시 마이그레이션 중이라면 `strict`가 기존 코드를 대량으로 깨뜨릴 수 있으니 `warn`으로 시작해 단계적으로 올리면 됩니다.
+오해 하나 짚고 갑니다. `findById()` 가 `Optional<T>` 를 돌려주는 건 이 옵션과 **무관**합니다 — 시그니처 자체가 `Optional` 일 뿐이에요. 이 옵션이 바꾸는 건 **`@Nullable` 이 붙은 자리의 타입이 `T!` 냐 `T?` 냐** 하나입니다. **새 프로젝트면 무조건 켜세요.** 레거시 마이그레이션 중이라면 `strict`가 기존 코드를 대량으로 깨뜨릴 수 있으니 `warn`으로 시작해 단계적으로 올리면 됩니다.
 
 ## 4. `jackson-module-kotlin` — 없으면 역직렬화가 깨진다
 
@@ -106,8 +111,14 @@ Jackson은 원래 **기본 생성자로 객체를 만들고 세터로 채우는*
 
 이 모듈이 없으면 이런 게 일어납니다.
 
-- `InvalidDefinitionException: cannot construct instance` — 운이 좋은 경우. 바로 터지니까요.
-- **`email`이 요청 JSON에 없는데도 `String` 타입 프로퍼티에 `null`이 들어간 객체가 만들어짐** — 운이 나쁜 경우. Kotlin 타입 시스템상 `String`은 null일 수 없는데 리플렉션이 우회해서 넣어버립니다. `request.email.length` 에서 **"있을 수 없는 NPE"** 가 나고, 개발자는 타입을 못 믿게 됩니다.
+- **`InvalidDefinitionException: cannot construct instance`** — 대개 이쪽입니다. `kotlinc` 는 `-java-parameters` 옵션 없이는 파라미터 이름을 바이트코드에 남기지 않으므로, 모듈 없는 Jackson 은 생성자 바인딩을 **시작조차 못 합니다.** 바로 터지니 오히려 다행이에요.
+
+한 가지는 분명히 하고 갑시다. **"non-null `String` 프로퍼티에 `null`이 들어간 객체가 만들어진다"는 일은 일어나지 않습니다.** `kotlinc` 가 주 생성자 앞에 인트린식 null 검사를 심어두기 때문에, 리플렉션으로 `null` 을 밀어 넣으면 그 자리에서 `NullPointerException: Parameter specified as non-null is null: method SignUpRequest.<init>, parameter email` 로 **즉시** 터집니다(fail-fast). 타입 시스템이 뚫리는 게 아니라 경계에서 끊기는 겁니다.
+
+대신 **모듈이 있어도 남는 구멍**이 둘 있으니 이쪽을 기억하세요.
+
+- **`List<String>` 안의 `null`.** 인트린식 검사는 생성자 파라미터 자체만 보고 제네릭 원소는 안 봅니다. `["a", null]` 이 들어오면 `List<String>` 안에 `null` 이 앉고, 나중에 원소를 쓰는 곳에서 NPE 가 납니다. 막으려면 `jackson-module-kotlin` 의 `strictNullChecks` 를 켜세요(기본 꺼짐, 비용이 있어 기본이 아닙니다).
+- **모든 파라미터에 기본값이 있는 data class.** 그러면 Kotlin 이 합성 no-arg 생성자를 만들고 Jackson 이 그걸 골라 쓸 수 있습니다. 요청에 값이 있었는데도 **조용히 기본값으로 대체된** 객체가 나올 수 있어요. DTO 에 기본값을 함부로 뿌리지 마세요 — 기본값은 "없어도 되는 필드" 라는 선언입니다.
 
 Spring Boot 3는 클래스패스에 Kotlin이 감지되면 이 모듈을 자동 등록해주지만, **의존성 자체가 없으면 등록할 것도 없습니다.** `spring-boot-starter-web`에 딸려 오지 않으니 명시하세요. 생성자 파라미터 이름을 읽어야 하므로 `kotlin-reflect`도 함께 필요합니다.
 
@@ -117,18 +128,42 @@ Spring Boot 3는 클래스패스에 Kotlin이 감지되면 이 모듈을 자동 
 kotlin { jvmToolchain(21) }
 ```
 
-Java/Kotlin 컴파일러와 실행 JVM 버전을 **한 줄로 통일**합니다. `sourceCompatibility` / `targetCompatibility` / `kotlinOptions.jvmTarget` 을 따로 맞추다 보면 `Inconsistent JVM-target compatibility` 로 빌드가 깨지는데, 툴체인 한 줄이면 끝입니다. 로컬 JDK가 21이 아니어도 Gradle이 알아서 받아옵니다.
+Java/Kotlin 컴파일러와 실행 JVM 버전을 **한 줄로 통일**합니다. `sourceCompatibility` / `targetCompatibility` / `kotlinOptions.jvmTarget` 을 따로 맞추다 보면 `Inconsistent JVM-target compatibility` 로 빌드가 깨지는데, 툴체인 한 줄이면 끝입니다.
+
+> **조건이 하나 붙습니다.** "로컬 JDK 가 21 이 아니어도 Gradle 이 알아서 받아온다" 는 **toolchain download repository 가 설정돼 있을 때만** 참입니다. 보통 `settings.gradle.kts` 에 foojay 리졸버를 넣어 해결합니다.
+>
+> ```kotlin
+> // settings.gradle.kts
+> plugins { id("org.gradle.toolchains.foojay-resolver-convention") version "0.8.0" }
+> ```
+>
+> 이게 없으면 Gradle 은 **로컬에 설치된 JDK 만 찾고**, 21 이 없으면 `No matching toolchains found` 로 빌드가 실패합니다. Spring Initializr 로 받은 프로젝트에는 들어 있지만 손으로 만든 프로젝트에는 빠져 있기 쉬운 줄입니다.
 
 ## 정리
 
 | 플러그인/옵션 | 되돌리는 Kotlin 기본값 | 없으면 생기는 일 |
 |---|---|---|
-| `plugin.spring` (allOpen) | 클래스가 `final` | `@Transactional` 이 **조용히** 무시됨 |
+| `plugin.spring` (allOpen) | 클래스가 `final` | CGLIB 프록시 생성 실패로 **기동 실패** (열린 클래스의 `final` 메서드는 조용히 무시) |
 | `plugin.jpa` (noArg) | 기본 생성자 없음 | 엔티티 인스턴스화 실패 |
 | `-Xjsr305=strict` | Java 반환값이 플랫폼 타입 | Spring API에서 NPE |
 | `jackson-module-kotlin` | `val` 뿐, 세터 없음 | DTO 역직렬화 실패 / non-null에 null 침투 |
 
 공통점이 보이시나요. **Kotlin이 "더 안전하려고" 정한 기본값들이, 리플렉션·프록시로 돌아가는 Spring과 정면 충돌합니다.** 이 네 줄은 그 충돌을 합의로 바꾸는 코드예요.
+
+## 리뷰할 때 보는 것
+
+Kotlin + Spring 프로젝트는 **`build.gradle.kts` 와 DTO 선언부**를 리뷰에서 제일 먼저 펼쳐야 합니다. 여기서 놓치면 컴파일러도 테스트도 안 잡아 줍니다.
+
+| 코드에서 보이면 | 이렇게 지적한다 |
+|---|---|
+| `plugins` 에 `kotlin("plugin.spring")` 이 없다 | allOpen 이 없으면 `@Service` 클래스가 `final` 이라 CGLIB 프록시 생성이 실패해 기동이 깨진다. 플러그인을 추가하라 |
+| `@Service` 클래스에 `open` 도 allOpen 대상 애노테이션도 없는 메서드 | 클래스만 열리고 메서드가 `final` 이면 그 메서드의 `@Transactional` 은 예외 없이 무시된다. 기동에 성공한 건 증거가 되지 않는다 |
+| 커스텀 스테레오타입 애노테이션(`@MyTxService`) | allOpen 프리셋 목록에 없는 애노테이션이다. `allOpen { annotation("com.example.MyTxService") }` 로 직접 등록하라 |
+| `@Entity` 인데 `plugin.jpa` 가 없다 | 주 생성자에 파라미터가 있으면 기본 생성자가 없어 Hibernate 인스턴스화가 실패한다. noArg 플러그인을 추가하라 |
+| `@Entity` 가 `data class` 다 | 엔티티는 일반 `class` 로 바꿔라. 모든 프로퍼티 기준 `equals`/`hashCode` 는 LAZY 프록시·`HashSet` 과 충돌한다. `data class` 는 DTO 자리다 |
+| 요청 DTO 의 모든 파라미터에 기본값이 있다 | Jackson 이 합성 no-arg 생성자를 골라 요청값이 조용히 기본값으로 대체될 수 있다. 기본값은 "없어도 되는 필드" 에만 달아라 |
+| `jackson-module-kotlin` · `kotlin-reflect` 의존성이 없다 | `val` 뿐인 data class 는 세터도 기본 생성자도 없어 역직렬화가 실패한다. `starter-web` 에 딸려 오지 않으니 명시하라 |
+| `jvmToolchain(21)` 은 있는데 `settings.gradle.kts` 에 foojay 리졸버가 없다 | 툴체인 자동 다운로드는 download repository 가 설정됐을 때만 동작한다. 로컬에 JDK 21 이 없는 머신에서 `No matching toolchains found` 로 깨진다 |
 
 ## 연습
 

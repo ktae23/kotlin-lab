@@ -26,9 +26,9 @@ tasks.register("generateVersionFile") {
 }
 ```
 
-`inputs` / `outputs` 선언이 **없으면** Gradle은 무엇이 바뀌었는지 알 길이 없으므로 **매번 실행합니다.** 이게 "우리 빌드는 왜 항상 풀로 도는가"의 가장 흔한 답이에요. 커스텀 task를 만들면서 `doLast { }` 만 적어 둔 코드를 리뷰에서 자주 봅니다.
+판정의 문턱은 **출력(`outputs`)** 입니다. 공식 문서가 못을 박아 뒀어요 — *"incremental build won't work unless a task has at least one task output"*. 출력이 없으면 재사용할 결과물이 없으니 Gradle 은 증분 판정을 아예 시도하지 않고 **매번 실행합니다.** 입력을 잔뜩 선언해 둬도 마찬가지고, 반대로 **출력만 선언한 task 는 UP-TO-DATE 가 될 수 있습니다**(입력 선언은 문서에서도 "usually", 즉 선택입니다). 입력이 하는 일은 판정 자격을 주는 게 아니라 **"언제 다시 돌아야 하는가"** 를 정하는 것이에요. 이게 "우리 빌드는 왜 항상 풀로 도는가"의 가장 흔한 답이고, 커스텀 task를 만들면서 `doLast { }` 만 적어 둔 코드를 리뷰에서 자주 봅니다.
 
-> 면접 질문으로 나오면 이렇게 답하세요: **"UP-TO-DATE 는 선언된 입력·출력의 지문 비교 결과다. 선언하지 않은 task는 판정 자체가 불가능해서 항상 실행된다."** 오늘 연습에서 이 판정기를 직접 만듭니다.
+> 면접 질문으로 나오면 이렇게 답하세요: **"출력을 선언하지 않은 task 는 증분 판정 대상이 아니라 항상 실행된다. 입력 선언은 '언제 다시 돌아야 하는가'를 정하는 것이다."** 순서를 거꾸로 말하는 사람이 대부분이라, 이 한 문장이 그대로 변별점이 됩니다. 오늘 연습에서 이 판정기를 직접 만듭니다.
 
 ## 빌드 캐시 — UP-TO-DATE 와 무엇이 다른가
 
@@ -121,7 +121,7 @@ Kotlin 컴파일러는 바뀐 파일과 **그 영향을 받는 파일만** 다�
 
 ## 리뷰에서 지적할 것
 
-- **커스텀 task에 `inputs` / `outputs` 선언이 없다** — 캐시와 증분 판정을 스스로 포기한 코드입니다.
+- **커스텀 task에 `outputs` 선언이 없다** — 증분 판정 대상에서 아예 빠집니다. 출력을 선언하고, 그 출력이 무엇에 따라 달라지는지를 `inputs` 로 적으세요.
 - **구성 시점에 무거운 연산** — 스크립트 최상위에서 파일을 읽거나 네트워크를 타면 **task를 하나도 안 돌려도** 그 비용을 냅니다. `providers` / `Provider.map` 으로 지연시키세요.
 - **`clean build` 가 습관** — `clean` 은 증분·캐시를 전부 무효화합니다. 빌드가 이상할 때만 쓰는 응급 조치지, 기본값이 아닙니다. CI 스크립트에 `clean` 이 박혀 있으면 원격 캐시를 켜도 효과가 없습니다.
 - **출력에 타임스탬프가 섞임** — 캐시가 영원히 미스입니다. jar의 경우 `isPreserveFileTimestamps = false` 로 재현 가능하게 만듭니다.
@@ -131,8 +131,8 @@ Kotlin 컴파일러는 바뀐 파일과 **그 영향을 받는 파일만** 다�
 
 `UP-TO-DATE` 판정을 직접 구현합니다. 채울 곳은 셋입니다.
 
-1. `fingerprint(task, workspace)` — task의 **입력 파일 경로와 내용**으로 지문을 만듭니다. 순서에 흔들리지 않게 경로를 정렬한 뒤 하나의 문자열로 합쳐 `hashCode()` 를 쓰세요.
-2. `isUpToDate(task, workspace)` — **입력을 선언하지 않은 task는 판정이 불가능하므로 무조건 false**. 그 외에는 기록된 지문과 지금 지문을 비교합니다.
+1. `fingerprint(task, workspace)` — task의 **입력 파일 경로와 내용**으로 지문을 만듭니다. 순서에 흔들리지 않게 경로를 정렬한 뒤 하나의 문자열로 합쳐 `hashCode()` 를 쓰세요. (실제 Gradle 은 암호학적 해시를 씁니다. `hashCode()` 는 32비트라 충돌하면 바뀐 입력을 UP-TO-DATE 로 **오판**할 수 있어요 — 연습용 단순화입니다.)
+2. `isUpToDate(task, workspace)` — **출력을 선언하지 않은 task 는 증분 판정 대상이 아니므로 무조건 false**. 그 외에는 기록된 지문과 지금 지문을 비교합니다.
 3. `runBuild` 의 분기 — up-to-date 면 `> Task :이름 UP-TO-DATE` 만 찍고, 아니면 **action 실행 → 지문 기록 → `> Task :이름`** 출력.
 
 출력을 보면 3차 빌드에서 테스트 코드만 고쳤을 때 `:jar` 가 건너뛰어지고, 4차에서 메인 소스를 고치니 **출력이 바뀌면서 뒤따르는 task까지 연쇄로 다시 도는** 게 보일 겁니다. 그게 input/output 선언이 만들어내는 전부입니다.
@@ -188,7 +188,7 @@ fun main() {
         Task(":jar", listOf("build/classes"), listOf("build/app.jar")) { ws ->
             ws.files["build/app.jar"] = "jar(" + ws.files["build/classes"] + ")"
         },
-        // 입력·출력을 선언하지 않은 task — 캐시가 영원히 무효다
+        // 출력을 선언하지 않은 task — 증분 판정 대상이 아니라 매번 실행된다
         Task(":printBuildInfo", emptyList(), emptyList()) { },
     )
 
@@ -234,15 +234,15 @@ fun main() {
 ```
 
 ```text hint
-Gradle이 하는 일은 딱 두 줄로 줄어듭니다. **"지금 입력의 지문을 계산한다"**, **"지난번에 기록해 둔 지문과 같으면 건너뛴다"**. 여기에 예외가 하나 있는데, **입력을 선언하지 않은 task** 입니다 — 비교할 것이 없으니 "같다"고 말할 근거가 없고, 그래서 매번 실행됩니다. `:printBuildInfo` 가 4번 다 실행되는 이유가 그겁니다.
+Gradle이 하는 일은 딱 두 줄로 줄어듭니다. **"지금 입력의 지문을 계산한다"**, **"지난번에 기록해 둔 지문과 같으면 건너뛴다"**. 여기에 문턱이 하나 있는데, **출력을 선언하지 않은 task** 는 이 판정에 올라가지도 못합니다 — 재사용할 결과물이 없으면 건너뛸 수가 없으니까요. 그래서 매번 실행됩니다. `:printBuildInfo` 가 4번 다 실행되는 이유가 그겁니다.
 ---
-지문은 `task.inputs.sorted().joinToString("|") { "$it=${workspace.files[it]}" }.hashCode()` 한 줄이면 됩니다. `sorted()` 가 들어가야 입력 선언 순서가 바뀌어도 같은 지문이 나와요. `isUpToDate` 는 `task.inputs.isNotEmpty() && fingerprints[task.name] == fingerprint(task, workspace)` 처럼 **두 조건의 `&&`** 입니다.
+지문은 `task.inputs.sorted().joinToString("|") { "$it=${workspace.files[it]}" }.hashCode()` 한 줄이면 됩니다. `sorted()` 가 들어가야 입력 선언 순서가 바뀌어도 같은 지문이 나와요. `isUpToDate` 는 `task.outputs.isNotEmpty() && fingerprints[task.name] == fingerprint(task, workspace)` 처럼 **두 조건의 `&&`** 입니다 — 앞 조건이 `inputs` 가 아니라 `outputs` 인 게 핵심이에요.
 ---
 `runBuild` 의 순서에 함정이 있습니다. **action 을 먼저 실행하고 나서 `record` 를 호출**해야 합니다 — `:compileKotlin` 이 `build/classes` 를 새로 쓰기 때문에, 그 뒤에 오는 `:test` 와 `:jar` 는 **바뀐 입력**을 보게 되고 연쇄로 다시 돕니다. 그게 4차 빌드의 출력이에요. 반대로 3차에서는 `build/classes` 가 그대로라 `:jar` 만 건너뜁니다. 출력 문자열도 정확히 맞추세요 — 실행이면 `"> Task ${task.name}"`, 건너뛰면 뒤에 `" UP-TO-DATE"` 가 붙습니다.
 ---
 뼈대는 이렇습니다.
 
-`fun isUpToDate(...) = task.inputs.___() && fingerprints[task.name] == fingerprint(task, workspace)`
+`fun isUpToDate(...) = task.outputs.___() && fingerprints[task.name] == fingerprint(task, workspace)`
 
 `if (checker.isUpToDate(task, workspace)) { println("> Task ${task.name} UP-TO-DATE") } else { task.___(workspace); checker.___(task, workspace); println("> Task ${task.name}") }`
 ```
@@ -267,12 +267,14 @@ class UpToDateChecker {
     private val fingerprints = mutableMapOf<String, Int>()
 
     // 선언 순서에 흔들리지 않도록 경로를 정렬한 뒤 "경로=내용" 으로 지문을 만든다
+    // (실제 Gradle 은 암호학적 해시를 쓴다 — hashCode() 는 32비트라 충돌 시 오판 가능)
     fun fingerprint(task: Task, workspace: Workspace): Int =
         task.inputs.sorted().joinToString("|") { "$it=${workspace.files[it]}" }.hashCode()
 
-    // 입력을 선언하지 않은 task 는 무엇이 바뀌었는지 알 수 없으므로 매번 실행된다
+    // 출력을 선언하지 않은 task 는 증분 판정 대상이 아니라 매번 실행된다.
+    // 입력 선언은 "판정 자격" 이 아니라 "언제 다시 도는가" 를 정한다.
     fun isUpToDate(task: Task, workspace: Workspace): Boolean =
-        task.inputs.isNotEmpty() && fingerprints[task.name] == fingerprint(task, workspace)
+        task.outputs.isNotEmpty() && fingerprints[task.name] == fingerprint(task, workspace)
 
     fun record(task: Task, workspace: Workspace) {
         fingerprints[task.name] = fingerprint(task, workspace)
@@ -307,7 +309,7 @@ fun main() {
         Task(":jar", listOf("build/classes"), listOf("build/app.jar")) { ws ->
             ws.files["build/app.jar"] = "jar(" + ws.files["build/classes"] + ")"
         },
-        // 입력·출력을 선언하지 않은 task — 캐시가 영원히 무효다
+        // 출력을 선언하지 않은 task — 증분 판정 대상이 아니라 매번 실행된다
         Task(":printBuildInfo", emptyList(), emptyList()) { },
     )
 

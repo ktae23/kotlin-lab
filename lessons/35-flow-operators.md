@@ -45,6 +45,8 @@ ids.flatMapMerge { id -> detailsOf(id) }
 | 순서 | **입력 순서 보장** | **보장 안 됨** |
 | 속도 | 느림 | 빠름 |
 
+둘 다 아직 opt-in 이 필요한 API 입니다. 예전엔 `@FlowPreview` 였는데 **coroutines 1.9 에서 `@ExperimentalCoroutinesApi` 로 승격**됐어요. 그래서 지금 쓰려면 `@OptIn(ExperimentalCoroutinesApi::class)` 입니다 — 옛 글을 보고 `@OptIn(FlowPreview::class)` 를 붙여 두면 경고는 그대로 남고 그 opt-in 은 아무 일도 하지 않습니다.
+
 > 실무 판단 기준: **순서가 의미를 갖는가?** 이벤트 소싱/상태 전이 로그면 `flatMapConcat`. 단순 조회 팬아웃이면 `flatMapMerge`. 면접에서 "왜 merge를 썼냐"에 "빠르니까"만 답하면 감점입니다. "순서 의존이 없어서"가 정답이에요.
 
 `flatMapLatest`도 있습니다. 새 값이 오면 **진행 중이던 안쪽 Flow를 취소**합니다. 검색어 자동완성처럼 "최신 것만 의미 있는" 경우에 씁니다.
@@ -93,7 +95,7 @@ flow { ... }.collectLatest { value -> slowRender(value) }
 
 ## flowOn — 업스트림 컨텍스트만 바꾼다
 
-Lesson 13에서 "Flow는 스스로 스레드를 바꾸지 않는다"고 했습니다. 바꾸는 유일한 방법이 `flowOn`입니다.
+Lesson 34에서 "Flow는 스스로 스레드를 바꾸지 않는다"고 했습니다. 바꾸는 유일한 방법이 `flowOn`입니다.
 
 ```kotlin
 flow { emit(jdbcQuery()) }   // ← 이 블록이 Dispatchers.IO 에서
@@ -142,9 +144,25 @@ flow
 
 Spring 쪽 비유로는 `SharedFlow`가 애플리케이션 이벤트 버스, `StateFlow`가 관찰 가능한 싱글턴 상태에 가깝습니다. 자세한 건 별도 주제고, 지금은 **"콜드 = 레시피, 핫 = 이미 흐르는 물"** 구분만 확실히 하세요.
 
+## 리뷰할 때 보는 것
+
+연산자 리뷰는 **"그걸 고른 근거가 코드에 남아 있는가"** 를 봅니다. 배압 장치와 평탄화는 특히 근거 없이 복붙되는 자리입니다.
+
+| 코드에서 보이면 | 이렇게 지적한다 |
+|---|---|
+| 체인 맨 아래에 붙은 `flowOn` | `flowOn` 은 자기 위(업스트림)만 바꿉니다. 맨 아래면 체인 전체가 옮겨가는 것이고, `collect` 블록은 여전히 호출자 스레드입니다. 의도가 후자면 위치가 아니라 대상이 틀렸습니다 |
+| 느린 건 `collect` 블록인데 `flowOn` 을 추가 | 소비 쪽 부하는 `flowOn` 으로 안 바뀝니다. 그 작업을 `onEach` 로 올려 `flowOn` 위에 두거나, 호출 지점을 `withContext` 로 감싸세요 |
+| `buffer()` 가 근거 없이 붙어 있음 | 셋은 의미가 다릅니다. 전부 처리해야 하면 `buffer`, 최신 값만 의미 있고 처리는 완주해야 하면 `conflate`, 낡은 작업을 죽여도 되면 `collectLatest`. 어느 쪽인지 한 줄 남겨주세요 |
+| 주문·결제처럼 유실 불가 이벤트에 `conflate` | 소비가 느린 동안 중간 값을 버립니다. 이건 성능 조절이 아니라 데이터 유실입니다. `buffer` 로 바꾸세요 |
+| `flatMapMerge` 뒤에 순서를 가정한 코드 | merge 는 도착 순서대로 방출해서 입력 순서를 보장하지 않습니다. 순서가 의미를 가지면 `flatMapConcat` |
+| `flatMapMerge` 를 고른 이유가 "빠르니까" | 판단 기준은 속도가 아니라 순서 의존 여부입니다. 이 스트림에 순서 의미가 없다는 근거를 적어주세요 |
+| 체인 중간의 `toList()` | 종단 연산자라 스트림이 여기서 끝나고 전부 메모리에 올라갑니다. Flow 로 흘린 이유가 사라집니다. 중간 변환은 `map`/`transform` 으로 |
+| 각자 따로 변하는 두 상태를 `zip` 으로 조합 | `zip` 은 양쪽에 새 값이 와서 짝이 맞아야 방출하고 짧은 쪽에서 끝납니다. "현재 값들의 조합"이 필요하면 `combine` |
+| `flatMapMerge` 에 `@OptIn(FlowPreview::class)` | coroutines 1.9 부터 `@ExperimentalCoroutinesApi` 로 승격됐습니다. 이 opt-in 은 아무 일도 하지 않고 경고만 남습니다. `@OptIn(ExperimentalCoroutinesApi::class)` 로 바꾸세요 |
+
 ## 연습
 
-세 개의 파이프라인을 완성하세요. (`flatMapConcat`은 `@OptIn(FlowPreview::class)` 가 이미 붙어 있습니다.)
+세 개의 파이프라인을 완성하세요. (`flatMapConcat`은 `@OptIn(ExperimentalCoroutinesApi::class)` 가 이미 붙어 있습니다.)
 
 1. `flowOf(1..5)` → 홀수만 → `"ORD-$it"` 로 변환 → `onEach` 로 `로그: $it` → `onCompletion` 으로 `파이프라인 완료` → `collect` 에서 `수집: $it`
 2. `flowOf("A", "B")` 를 `flatMapConcat` 으로 각각 `"$id-1"`, `"$id-2"` 두 값으로 펼쳐 `펼침: $it` 출력 (순서 보장 확인)
@@ -153,7 +171,7 @@ Spring 쪽 비유로는 `SharedFlow`가 애플리케이션 이벤트 버스, `St
 1번에서 `로그:` 와 `수집:` 이 **번갈아** 찍히는 걸 확인하세요. `onEach`가 원소 단위로 업스트림에서 도는 증거입니다.
 
 ```kotlin starter
-import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.flatMapConcat
 import kotlinx.coroutines.flow.flowOf
@@ -163,7 +181,7 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.zip
 import kotlinx.coroutines.runBlocking
 
-@OptIn(FlowPreview::class)
+@OptIn(ExperimentalCoroutinesApi::class)
 fun main() = runBlocking {
     // TODO: 1) filter → map → onEach → onCompletion → collect
 
@@ -195,7 +213,7 @@ Flow 연산자는 **붙인 순서가 곧 파이프의 위아래**입니다. `col
 ---
 쓸 연산자는 이미 import 에 다 들어 있습니다. 1번은 `filter` → `map` → `onEach` → `onCompletion` → `collect`, 2번은 `flatMapConcat`, 3번은 `zip`. `onCompletion` 의 람다 파라미터는 종료 원인(`cause`)이라 이번 연습에서는 안 써도 됩니다.
 ---
-`flatMapConcat` 의 람다는 값이 아니라 **Flow 를 반환**해야 합니다. `"A"` 하나로 두 값을 만들려면 그 자리에서 `flowOf(...)` 를 새로 열면 돼요. `concat` 이라 앞 Flow 를 끝까지 소진한 뒤 다음 Flow 를 열기 때문에 `A-1, A-2, B-1, B-2` 순서가 보장됩니다. 참고로 `flatMapConcat` 은 `@FlowPreview` 라 `@OptIn(FlowPreview::class)` 이 필요한데, starter 의 `main` 에 이미 붙어 있습니다. `zip` 은 수신 Flow에 상대 Flow와 결합 람다를 함께 넘겨 **양쪽에서 한 개씩 짝**을 맞춥니다.
+`flatMapConcat` 의 람다는 값이 아니라 **Flow 를 반환**해야 합니다. `"A"` 하나로 두 값을 만들려면 그 자리에서 `flowOf(...)` 를 새로 열면 돼요. `concat` 이라 앞 Flow 를 끝까지 소진한 뒤 다음 Flow 를 열기 때문에 `A-1, A-2, B-1, B-2` 순서가 보장됩니다. 참고로 `flatMapConcat` 의 opt-in 애노테이션은 coroutines **1.9 부터 `@FlowPreview` → `@ExperimentalCoroutinesApi` 로 승격**됐습니다. 그래서 필요한 건 `@OptIn(ExperimentalCoroutinesApi::class)` 이고, starter 의 `main` 에 이미 붙어 있습니다. 옛 글대로 `FlowPreview` 를 붙이면 경고가 사라지지 않아요. `zip` 은 수신 Flow에 상대 Flow와 결합 람다를 함께 넘겨 **양쪽에서 한 개씩 짝**을 맞춥니다.
 ---
 뼈대는 이렇습니다. 세 파이프라인 모두 마지막이 `collect` 로 끝나요.
 
@@ -207,7 +225,7 @@ Flow 연산자는 **붙인 순서가 곧 파이프의 위아래**입니다. `col
 ```
 
 ```kotlin solution
-import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.flatMapConcat
 import kotlinx.coroutines.flow.flowOf
@@ -217,7 +235,7 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.zip
 import kotlinx.coroutines.runBlocking
 
-@OptIn(FlowPreview::class)
+@OptIn(ExperimentalCoroutinesApi::class)
 fun main() = runBlocking {
     // 1) onEach 는 업스트림이라 collect 보다 먼저 돈다 → 로그/수집이 번갈아 찍힌다.
     flowOf(1, 2, 3, 4, 5)

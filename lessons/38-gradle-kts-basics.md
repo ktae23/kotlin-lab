@@ -77,10 +77,12 @@ apply(plugin = "org.jetbrains.kotlin.jvm")
 plugins {
     kotlin("jvm") version "2.0.21"
     kotlin("plugin.spring") version "2.0.21"
-    id("org.springframework.boot") version "3.3.4"
+    id("org.springframework.boot") version "3.3.5"
     id("io.spring.dependency-management") version "1.1.6"
 }
 ```
+
+`io.spring.dependency-management` 는 Spring Initializr 가 지금도 기본으로 넣어 주는 플러그인입니다. 다만 그게 하던 일은 Gradle 네이티브 `platform(...)` 이 대체했으니, 둘 중 무엇을 쓸지는 다음 레슨(Lesson 39)에서 정합니다.
 
 차이는 **Gradle이 언제 플러그인의 존재를 아느냐**입니다. `plugins { }` 블록은 다른 코드보다 먼저, 별도로 평가됩니다. 덕분에 Gradle은 스크립트 본문을 컴파일하기 **전에** 플러그인이 제공하는 확장(`kotlin { }`, `springBoot { }` 같은 블록)의 타입을 알 수 있어요. 그래서 자동완성과 타입 검사가 동작합니다.
 
@@ -120,7 +122,7 @@ tasks.named<Test>("test") {
 }
 ```
 
-`jvmToolchain(21)`은 Kotlin 컴파일러·Java 컴파일러·테스트 실행 JVM을 **한 줄로 통일**합니다. 로컬 JDK가 21이 아니어도 Gradle이 받아옵니다. 이걸 안 쓰고 `jvmTarget`과 `sourceCompatibility`를 따로 맞추다 `Inconsistent JVM-target compatibility` 로 깨지는 게 흔한 사고입니다.
+`jvmToolchain(21)`은 Kotlin 컴파일러·Java 컴파일러·테스트 실행 JVM을 **한 줄로 통일**합니다. 로컬 JDK가 21이 아니어도 Gradle이 받아옵니다 — 단 **`settings.gradle.kts` 에 toolchain download repository(보통 `org.gradle.toolchains.foojay-resolver-convention` 플러그인)가 설정돼 있을 때만**이고, 없으면 `No matching toolchains found` 로 빌드가 실패합니다. 이걸 안 쓰고 `jvmTarget`과 `sourceCompatibility`를 따로 맞추다 `Inconsistent JVM-target compatibility` 로 깨지는 게 흔한 사고입니다.
 
 ## Groovy를 Kotlin으로 옮길 때 걸리는 곳
 
@@ -137,7 +139,7 @@ tasks.named<Test>("test") {
 
 ## 리뷰에서 지적할 것
 
-- **버전 하드코딩이 여기저기 흩어져 있다** — `"3.3.4"` 가 세 파일에 적혀 있으면 올릴 때 하나를 빠뜨립니다. 다음 레슨의 버전 카탈로그가 답입니다.
+- **버전 하드코딩이 여기저기 흩어져 있다** — `"3.3.5"` 가 세 파일에 적혀 있으면 올릴 때 하나를 빠뜨립니다. 다음 레슨의 버전 카탈로그가 답입니다.
 - **`compile` / `runtime` 을 쓰고 있다** — Gradle 7에서 제거된 configuration입니다. 인터넷에서 복사한 오래된 스니펫의 흔적이에요. `implementation` / `runtimeOnly` 로 고칩니다.
 - **플러그인 버전이 모듈마다 다르다** — `kotlin("jvm")`은 2.0.21인데 `kotlin("plugin.spring")`은 1.9.x 같은 조합. 컴파일러 플러그인은 컴파일러 버전과 맞아야 합니다. 루트에서 한 번만 선언하세요.
 - **`apply(plugin = ...)` 가 섞여 있다** — 타입 안전을 포기한 코드입니다. `plugins { }` 로 올립니다.
@@ -220,7 +222,7 @@ fun main() {
         plugins {
             kotlin("jvm") version "2.0.21"
             kotlin("plugin.spring") version "2.0.21"
-            id("org.springframework.boot") version "3.3.4"
+            id("org.springframework.boot") version "3.3.5"
             id("io.spring.dependency-management") version "1.1.6"
         }
         dependencies {
@@ -240,7 +242,7 @@ fun main() {
 plugins {
     id("org.jetbrains.kotlin.jvm") version "2.0.21"
     id("org.jetbrains.kotlin.plugin.spring") version "2.0.21"
-    id("org.springframework.boot") version "3.3.4"
+    id("org.springframework.boot") version "3.3.5"
     id("io.spring.dependency-management") version "1.1.6"
 }
 
@@ -261,7 +263,7 @@ kotlin 플러그인 버전 일치: true
 ---
 쓸 도구는 셋입니다. `infix fun PluginSpec.version(value: String): PluginSpec` — `infix` 는 파라미터가 정확히 하나일 때만 붙일 수 있고, 그래야 `a version "b"` 로 적을 수 있습니다. `buildScript` 에는 `apply` 가 딱 맞아요(`BuildScriptScope().apply(block)` — `apply` 는 수신 객체 지정 람다를 받아 **자기 자신**을 돌려줍니다). 마지막 검사는 `filter` → `map` → `distinct` 세 단계면 끝납니다.
 ---
-`version` 확장 함수를 **`PluginsScope` 의 멤버로** 두세요. 그러면 `plugins { }` 블록 안에서만 보입니다 — Gradle이 `version` 을 아무 데서나 못 쓰게 막는 것과 같은 구조예요. 함수 안에서는 `this.version = value` 처럼 **`this.` 를 붙이는 편이 안전**합니다. 확장 함수 이름과 프로퍼티 이름이 같아서 헷갈리기 쉽거든요. 버전 일치 검사는 "서로 다른 버전이 **몇 종류**인가"를 세면 됩니다 — 한 종류면 일치입니다.
+`version` 확장 함수를 **`PluginsScope` 의 멤버로** 두세요. 그러면 `plugins { }` 블록 안에서만 보입니다. (Gradle 쪽은 사정이 다릅니다 — 실제 `infix fun PluginDependencySpec.version(...)` 은 `org.gradle.kotlin.dsl` 의 **최상위** 함수라 스크립트 어디서든 보여요. 블록 안으로 가두는 멤버 확장은 이 연습이 택한, 더 나은 쪽입니다.) 함수 안에서는 `this.version = value` 처럼 **`this.` 를 붙이는 편이 안전**합니다. 확장 함수 이름과 프로퍼티 이름이 같아서 헷갈리기 쉽거든요. 버전 일치 검사는 "서로 다른 버전이 **몇 종류**인가"를 세면 됩니다 — 한 종류면 일치입니다.
 ---
 뼈대는 이렇습니다. 빈칸만 채우세요.
 
@@ -349,7 +351,7 @@ fun main() {
         plugins {
             kotlin("jvm") version "2.0.21"
             kotlin("plugin.spring") version "2.0.21"
-            id("org.springframework.boot") version "3.3.4"
+            id("org.springframework.boot") version "3.3.5"
             id("io.spring.dependency-management") version "1.1.6"
         }
         dependencies {

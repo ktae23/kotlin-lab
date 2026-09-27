@@ -2,19 +2,22 @@
 
 Java/Spring 5년 하셨으면 JUnit5 + AssertJ + Mockito 조합은 손에 붙어 있을 겁니다. Kotlin에서 **그대로 써도 됩니다.** 실제로 많은 팀이 그렇게 써요. 그런데 Mockito는 Kotlin에서 **구조적으로 불편합니다.** 취향 문제가 아니라, 왜 그런지부터 봅시다.
 
-## Mockito가 Kotlin에서 불편한 진짜 이유
+## Mockito 로도 됩니다 — 그런데도 MockK 를 쓰는 이유
 
-Kotlin 클래스는 **기본이 `final`** 입니다(Lesson 12). Mockito는 서브클래싱으로 mock을 만들고요.
+먼저 낡은 이야기 하나를 걷어냅시다. Kotlin 클래스는 **기본이 `final`** 이고(L10) Mockito 는 서브클래싱으로 mock 을 만듭니다. 그래서 **"Kotlin 은 Mockito 로 mock 이 안 된다"** 는 말이 오래 따라다녔죠. **이제는 틀린 말입니다.**
 
-```kotlin
-class OrderService(private val repo: OrderRepository)   // final!
+> `Mockito` javadoc §39 — *"Mockito now offers support for mocking final classes and methods by default … Since 5.0.0, this feature is enabled by default."*
 
-val service = mock(OrderService::class.java)   // MockitoException: Cannot mock/spy
-```
+Boot 3.3 이 관리하는 Mockito 는 **5.11.0** 이라 인라인 목 메이커가 **기본값**입니다. `mock-maker-inline` 을 수동으로 켜거나, 테스트 때문에 프로덕션 클래스에 `open` 을 붙이거나, all-open 을 끌어오던 우회책은 지금 필요 없어요. 면접에서 *"Kotlin 은 final 이라 Mockito 가 안 돼서요"* 라고 답하면 **"Mockito 5 부터는 기본으로 됩니다"** 로 받힙니다.
 
-해결책 세 개가 전부 찜찜합니다. 클래스마다 `open` 붙이기(**테스트 때문에 프로덕션 설계를 훼손**), all-open 플러그인(빌드 복잡도), `mock-maker-inline`(바이트코드 조작, 느림). 결정타는 따로 있는데, **`suspend` 함수 모킹이 지저분합니다.** `suspend fun`은 컴파일되면 `Continuation` 파라미터가 붙은 함수라 `when(repo.find(1))` 같은 스텁이 그대로 안 먹어요.
+그러면 MockK 를 고르는 근거는 다른 데 있어야겠죠. 실제로 있습니다.
 
-> **면접 포인트.** "Kotlin에서 왜 MockK를 쓰나요?"는 실제로 나옵니다. 답: *"Kotlin 클래스가 final 기본이라 Mockito는 우회 설정이 필요하고, suspend 함수 모킹이 1급 지원되지 않기 때문"* — 여기까지면 충분합니다.
+- **`suspend` 함수 1급 지원.** `suspend fun` 은 컴파일되면 `Continuation` 파라미터가 붙은 함수입니다. Mockito 로 스텁하려면 `mockito-kotlin` 같은 보조 라이브러리와 `runBlocking` 을 끼워야 해요. MockK 는 `coEvery { }` / `coVerify { }` 를 **전용 API 로** 갖고 있습니다. 코루틴이 있는 코드베이스라면 이게 결정타입니다.
+- **람다 안이라 타입 추론이 살아 있는 DSL.** `every { repo.findById(1L) } returns order` 는 그냥 Kotlin 코드입니다. `any()` 매처도 제네릭 타입이 유지돼서 `anyLong()`·`anyString()` 처럼 타입별 함수를 외울 일이 없어요.
+- **`relaxed` 목.** `mockk(relaxed = true)` 는 스텁하지 않은 호출에 타입에 맞는 기본값을 돌려줍니다. 의존성이 넓은 레거시를 테스트로 감쌀 때 유용해요(남용 경고는 아래에).
+- **`object`·최상위·확장 함수 모킹.** `mockkObject`, `mockkStatic` 으로 Kotlin 특유의 선언까지 다룹니다. Mockito 에는 대응물이 마땅치 않습니다.
+
+> **면접 포인트.** "Kotlin에서 왜 MockK를 쓰나요?"는 실제로 나옵니다. 답: *"Mockito 도 5 부터는 final 클래스를 기본으로 목킹하니 그건 이유가 안 됩니다. `suspend` 함수를 `coEvery`/`coVerify` 로 1급 지원한다는 점, 그리고 목 정의가 람다 안이라 제네릭 타입 추론이 유지된다는 점 때문입니다. 코루틴을 안 쓰는 프로젝트라면 굳이 갈아탈 이유는 크지 않습니다."* — 마지막 한 문장이 균형을 잡아 줍니다.
 
 ## MockK — Kotlin을 전제로 만든 모킹 라이브러리
 
@@ -32,9 +35,9 @@ coVerify { repo.findByIdAsync(any()) }
 
 | Mockito | MockK | 비고 |
 |---|---|---|
-| `mock(X.class)` | `mockk<X>()` | final 클래스 OK |
+| `mock(X.class)` | `mockk<X>()` | 둘 다 final 클래스 OK (Mockito 5+) |
 | `when(x.f()).thenReturn(v)` | `every { x.f() } returns v` | 람다 안이라 타입 추론됨 |
-| (없음) | `coEvery { }` / `coVerify { }` | **suspend 전용** |
+| (보조 라이브러리 필요) | `coEvery { }` / `coVerify { }` | **suspend 1급 지원** |
 | `verify(x).f()` | `verify { x.f() }` | |
 | `spy(obj)` | `spyk(obj)` | |
 | `mock(RELAXED)` | `mockk(relaxed = true)` | 스텁 안 한 호출은 기본값 |
@@ -88,7 +91,7 @@ assertThat(s).startsWith("OR")   →  s shouldStartWith "OR"
 assertThatThrownBy { }.isInstanceOf(E::class.java)  →  shouldThrow<E> { }
 ```
 
-`shouldBe`는 **`infix` 함수**(Lesson 7)입니다. Kotlin 문법만으로 DSL이 나오는 거지 마법이 아니에요 — 연습에서 직접 만듭니다. 그리고 `order.shouldNotBeNull()` 뒤에는 **스마트 캐스트가 걸려서** `order.title`을 `?.` 없이 바로 씁니다(`contract` 덕분). AssertJ엔 없는 이점입니다.
+`shouldBe`는 **`infix` 함수**(L16)입니다. Kotlin 문법만으로 DSL이 나오는 거지 마법이 아니에요 — 연습에서 직접 만듭니다. 그리고 `order.shouldNotBeNull()` 뒤에는 **스마트 캐스트가 걸려서** `order.title`을 `?.` 없이 바로 씁니다(`contract` 덕분). AssertJ엔 없는 이점입니다.
 
 ## 테스트 픽스처는 기본값 있는 팩토리 함수
 
@@ -117,7 +120,13 @@ Kotlin 이야기는 아니지만 실무에서 가장 많이 틀리는 부분이�
 | `@WebMvcTest` | MVC 계층 + 컨트롤러만 | ~1초 | 직렬화·검증·상태코드 |
 | `@SpringBootTest` | **전체 컨텍스트** | 수~수십 초 | 종단 시나리오 **소수만** |
 
-Kotlin + Boot 3.x 에서는 **테스트 클래스도 생성자 주입**이 됩니다(`class OrderControllerTest(private val mvc: MockMvc)`). `@Autowired` 필드 범벅이 사라져요. 다만 `@MockkBean`(springmockk)은 여전히 필드 주입이라 `lateinit var`가 필요합니다.
+테스트 클래스도 **생성자 주입으로 쓸 수 있습니다** — 단 **공짜가 아닙니다.** `@TestConstructor` 의 기본 `autowireMode` 는 **`ANNOTATED`** 라서, 생성자만 만들어 두면 Spring 이 주입해 주지 않고 테스트가 뜨지도 않아요. **Boot 가 이 기본값을 바꿔 주지 않습니다.** 셋 중 하나를 해야 합니다.
+
+- 생성자에 `@Autowired` 를 붙인다
+- 클래스에 `@TestConstructor(autowireMode = TestConstructor.AutowireMode.ALL)` 을 붙인다
+- `src/test/resources/junit-platform.properties` 에 `spring.test.constructor.autowire.mode = all` 을 넣는다 — **팀 전체에 한 번, 이게 권장**
+
+세 번째를 해두면 그때부터 `class OrderControllerTest(private val mvc: MockMvc)` 가 그냥 됩니다. "Kotlin + Boot 3 면 알아서 된다" 고 알고 계셨다면 여기서 고쳐 두세요 — 그대로 따라 하면 테스트가 안 뜹니다. 그리고 `@MockkBean`(springmockk)은 여전히 필드 주입이라 `lateinit var`가 필요합니다.
 
 > **경고.** `@SpringBootTest`를 습관적으로 붙이는 팀은 1년 뒤 CI가 20분 걸립니다. *"이 테스트가 정말 스프링 컨텍스트를 필요로 하는가?"* — 서비스 로직 테스트는 대부분 **아닙니다.** 생성자에 mock 넣고 끝내세요.
 
@@ -143,10 +152,35 @@ class OrderService(
 ) {
     suspend fun load(id: Long) = withContext(dispatcher) { repo.findBlocking(id) }
 }
-val service = OrderService(repo, UnconfinedTestDispatcher())        // 테스트에서
 ```
 
+```kotlin
+@Test
+fun `재시도 사이의 대기는 가상 시간으로 흐른다`() = runTest {
+    // testScheduler 를 넘겨야 runTest 의 가상 시계를 함께 쓴다
+    val service = OrderService(repo, StandardTestDispatcher(testScheduler))
+    service.load(1L) shouldBe order
+}
+```
+
+> **여기서 한 줄이 갈립니다.** `runTest` **바깥**에서 `UnconfinedTestDispatcher()` 를 인자 없이 만들면 **스케줄러가 따로 생겨** 가상 시간이 공유되지 않습니다. 가상 시간을 쓰겠다고 만든 디스패처가 가상 시간을 안 쓰는 거죠. 반드시 `runTest` 블록 안에서 `testScheduler` 를 넘기세요 — L37 에서 `StandardTestDispatcher(testScheduler)` 로 배운 그 형태입니다.
+
 **디스패처를 하드코딩하지 마세요.** 이거 하나가 코루틴 테스트 난이도의 절반입니다.
+
+## 리뷰할 때 보는 것
+
+테스트 PR 은 "통과했다" 가 통과 기준이 아닙니다. **무엇을 검증하는지, 얼마나 빨리 도는지**를 보세요.
+
+| 코드에서 보이면 | 이렇게 지적한다 |
+|---|---|
+| 서비스 로직 테스트에 `@SpringBootTest` | 생성자에 목을 넣는 순수 단위 테스트로 바꿔라. 컨텍스트가 필요한 이유를 대지 못하면 CI 시간만 먹는다 |
+| `mockk(relaxed = true)` 가 기본처럼 쓰인다 | 스텁하지 않은 호출이 조용히 기본값을 돌려준다. 통과하지만 아무것도 검증하지 않는 테스트가 된다. 필요한 호출만 `every` 로 명시하라 |
+| `runTest` 밖에서 만든 `UnconfinedTestDispatcher()` 를 주입한다 | 스케줄러가 달라 가상 시간이 공유되지 않는다. `runTest` 안에서 `StandardTestDispatcher(testScheduler)` 를 넘겨라 |
+| 프로덕션 코드가 `Dispatchers.IO` 를 직접 부른다 | 디스패처를 생성자 파라미터로 빼고 기본값만 `Dispatchers.IO` 로 둬라. 안 그러면 테스트에서 가상 시간을 못 쓴다 |
+| 테스트 클래스가 생성자 주입인데 `@TestConstructor` 설정이 없다 | `@TestConstructor` 기본값은 `ANNOTATED` 라 주입이 안 된다. `spring.test.constructor.autowire.mode=all` 을 `junit-platform.properties` 에 넣어라 |
+| "Kotlin 은 final 이라 Mockito 를 못 쓴다" 는 주석·문서 | Mockito 5 부터 final 클래스/메서드 목킹이 기본이다. MockK 를 쓰는 근거는 `suspend` 1급 지원과 타입 추론이 유지되는 DSL 로 적어라 |
+| 테스트 픽스처를 빌더 체인으로 만든다 | 기본값 있는 팩토리 함수 + 이름 있는 인자로 바꿔라. `order(status = CANCELED)` 한 줄이면 이 테스트가 무엇을 신경 쓰는지 바로 보인다 |
+| 스펙 스타일이 파일마다 다르다 | 팀 컨벤션으로 하나(보통 `StringSpec`)를 정하라. 스타일이 섞이면 읽는 비용이 테스트를 쓰는 비용보다 커진다 |
 
 ## 연습
 

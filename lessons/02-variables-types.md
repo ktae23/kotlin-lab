@@ -169,6 +169,19 @@ class OrderService(private val repo: OrderRepository)
 const val MAX_RETRY = 3   // top-level 또는 object 안에서만. String 과 기본 타입만 가능
 ```
 
+## 리뷰할 때 보는 것
+
+| 코드에서 보이면 | 이렇게 지적한다 |
+|---|---|
+| `var` 인데 재할당이 한 번도 없다 | `val` 로. 바뀌지 않는다는 걸 타입이 말하게 하라 |
+| `(a * b).toLong()` 으로 큰 수 계산 | `Int` 끼리 곱한 뒤 변환이라 이미 넘쳤다. **곱하기 전에** `toLong()` |
+| 금액·수량에 `Int` | 상한이 21억이다. 누적되는 값이면 `Long`, 소수면 `BigDecimal` |
+| `if (s.isEmpty())` 로 공백 검사 | `"   "` 는 통과한다. `isBlank()` 를 쓰라 |
+| `as` 캐스팅 | 실패해도 되는 자리면 `as?` + `?:`. `as` 는 던진다 |
+| `0.1 + 0.2 == 0.3` 비교 | 부동소수 동등 비교. 허용 오차를 두거나 `BigDecimal` |
+| 반환 타입을 추론에 맡긴 공개 함수 | 공개 API 는 명시하라. 구현이 바뀌면 시그니처가 조용히 바뀐다 |
+
+
 ## 연습
 
 다섯 개의 함수를 채우세요. 1~4번은 한 줄이고, 걸리는 지점은 **전부 타입 변환**입니다. 5번만 세 줄이고 `Any`에서 타입을 좁히는 문제입니다.
@@ -262,6 +275,8 @@ fun digitValue(c: Char): Int = c.digitToInt()
 // 100.0 을 곱해 나눗셈 자체를 Double 로 끌어올린다. correct / total 을 먼저 하면 0 이다.
 fun accuracy(correct: Int, total: Int): Double = correct * 100.0 / total
 
+// 실무라면 알 수 없는 타입을 0 으로 삼키면 안 된다 — 0 은 "설정이 0" 과 구분이 안 된다.
+// 반환 타입을 Long? 로 두고 호출부가 판단하게 하거나, 설정 파싱 실패는 예외로 터뜨린다.
 fun asByteSize(value: Any): Long {
     if (value is Int) return value.toLong()   // is 로 좁히면 value 는 여기서 Int — 캐스팅 불필요
     val l = value as? Long                    // 실패해도 되는 자리라 as 가 아니라 as?

@@ -105,7 +105,7 @@ JPA나 QueryDSL을 쓰면 애노테이션 처리기가 붙습니다. 여기서 �
 
 1번이 문제입니다. **모든 Kotlin 파일에 대해 Java stub을 만들어야** 하고, 이건 사실상 한 번 더 컴파일하는 비용이에요. 프로젝트가 커질수록 kapt 단계가 전체 빌드의 상당 부분을 차지합니다.
 
-**KSP(Kotlin Symbol Processing)** 는 stub을 만들지 않고 **Kotlin 심볼을 직접 읽습니다.** Java를 거치지 않으니 그 비용이 통째로 사라집니다. JetBrains 측정으로 보통 2배 안팎 빠릅니다.
+**KSP(Kotlin Symbol Processing)** 는 stub을 만들지 않고 **Kotlin 심볼을 직접 읽습니다.** Java를 거치지 않으니 그 비용이 통째로 사라집니다. Google 측정으로 보통 2배 안팎 빠릅니다.
 
 ```kotlin
 // kapt

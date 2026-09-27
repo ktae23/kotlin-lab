@@ -70,9 +70,13 @@ fun canSubmit(items: List<Item>) = items.isNotEmpty() && items.all { it.validate
 ```kotlin
 amounts.sum()                    // List<Int> 처럼 숫자 컬렉션에만
 orders.sumOf { it.amount }       // 객체에서 숫자를 뽑아 합산
-orders.map { it.amount }.sum()   // ❌ 중간 리스트 하나를 더 만든다
-orders.map { it.amount }.average()   // Double. 빈 컬렉션이면 NaN
+orders.map { it.amount }.sum()   // ❌ 중간 리스트 하나를 더 만든다 — sumOf { } 가 있다
+orders.map { it.amount }.average()   // ✅ 이건 어쩔 수 없다. Double, 빈 컬렉션이면 NaN
 ```
+
+**평균만은 예외입니다.** `sumOf`/`maxOf`/`minOf` 는 있는데 **stdlib 에 `averageOf` 는 없습니다.** 그래서 객체에서 숫자를 뽑아 평균을 내려면 `map { }.average()` 가 **관용구(idiom)** 예요. 아래 체크리스트에서 `map { }.sum()` 을 지적하라고 하는 것과 헷갈리지 마세요 — 지적 대상은 `sum`/`max`/`min` 이고, `average` 는 대안이 없습니다.
+
+> 중간 리스트가 정말 아까운 큰 컬렉션이라면 `asSequence().map { }.average()` 나 `sumOf { it.x } / size.toDouble()` 로 피할 수 있지만, 후자는 **빈 컬렉션에서 `NaN` 대신 0 나누기 결과**가 되니 의미가 달라집니다.
 
 `average()`가 **빈 컬렉션에서 예외가 아니라 `NaN`을 반환**한다는 걸 기억하세요. 그대로 DB에 넣거나 JSON으로 내보내면 그때 터집니다.
 
@@ -89,12 +93,14 @@ Kotlin 1.4에서 `max()`/`maxBy()`가 **deprecated** 되고 `maxOrNull()`/`maxBy
 
 그래서 지금은 같은 이름이 **버전에 따라 의미가 정반대**입니다. 1.4~1.6 시절 코드를 읽을 때, 그리고 오래된 예제를 복붙할 때 사고가 나요.
 
-| 함수 | 반환 | 빈 컬렉션 |
-|---|---|---|
-| `maxOrNull()` / `maxByOrNull { }` | `T?` | `null` |
-| `max()` / `maxBy { }` (1.7+) | `T` | **예외** |
-| `maxOf { }` | 선택자의 값 `R` | **예외** |
-| `maxOfOrNull { }` | `R?` | `null` |
+네 함수 모두 **1.4에서 `...OrNull` 계열과 함께 정리된 한 가족**입니다. `maxOf { }` / `maxOfOrNull { }` 가 예전부터 있던 별개 함수인 게 아니라, 같은 시기에 "빈 컬렉션을 타입에 드러내자"는 원칙으로 같이 들어왔어요. 아래 표의 `(1.7+)` 는 **`max()`/`maxBy { }` 라는 이름이 되살아난 시점**입니다.
+
+| 함수 | 도입 | 반환 | 빈 컬렉션 |
+|---|---|---|---|
+| `maxOrNull()` / `maxByOrNull { }` | 1.4 | `T?` | `null` |
+| `max()` / `maxBy { }` | 1.4 deprecated → **1.7 부활** | `T` | **예외** |
+| `maxOf { }` | 1.4 | 선택자의 값 `R` | **예외** |
+| `maxOfOrNull { }` | 1.4 | `R?` | `null` |
 
 > 리뷰 규칙: **컬렉션이 비어 있을 수 있는 자리면 `...OrNull` + `?:`**, 절대 비지 않는다고 보장되면 `max`를 쓰되 그 보장이 코드에 드러나야 합니다. `maxBy { }!!` 는 둘 다 아닌 최악입니다.
 
@@ -118,16 +124,41 @@ emptyList<Int>().fold(0) { acc, x -> acc + x }    // 0
 listOf(10, 20, 30).runningFold(0) { acc, x -> acc + x }   // [0, 10, 30, 60]
 ```
 
-## `groupingBy` 는 `eachCount` 만이 아니다
+## `groupingBy` — 나눠서 바로 집계하기
 
-L21에서 `groupBy`와 `groupingBy { }.eachCount()`를 봤습니다. `groupingBy`의 진짜 값은 **중간 리스트를 만들지 않고 그룹별로 집계**한다는 것입니다.
+L21에서 `groupBy` 를 봤습니다 — 원소를 하나도 버리지 않고 `Map<K, List<V>>` 로 **모양만 바꾸는** 함수였죠. `groupingBy` 는 여기서 처음인데, 이름이 비슷해도 하는 일이 다릅니다. `groupBy` 가 그룹마다 리스트를 만들어 두는 반면 **`groupingBy` 는 리스트를 만들지 않고 그룹별로 바로 접습니다.** 그래서 `groupBy { }.mapValues { it.value.sumOf { … } }` 처럼 두 번 도는 코드를 한 번으로 줄여요.
+
+반환 타입을 보면 분명해집니다.
+
+```kotlin
+orders.groupBy { it.branch }       // Map<String, List<Order>> — 그 자리에서 맵이 완성된다
+orders.groupingBy { it.branch }    // Grouping<Order, String>  — 아직 아무것도 안 했다
+```
+
+`Grouping` 은 맵이 아니라 **"어떻게 나눌지"만 담아둔 레시피 객체**입니다. 종단 연산이 붙어야 비로소 한 번 순회하면서 집계해요.
 
 ```kotlin
 orders.groupBy { it.branch }.mapValues { (_, v) -> v.sumOf { it.amount } }  // 그룹마다 List 생성
 orders.groupingBy { it.branch }.fold(0) { acc, o -> acc + o.amount }        // 리스트 없이 바로 접는다
 ```
 
-`eachCount()`, `fold()`, `reduce()`, `aggregate()` 네 개가 있고, 앞의 것으로 안 되면 `aggregate()`로 다 됩니다.
+종단 연산은 네 개입니다.
+
+| 종단 연산 | 하는 일 | 결과 |
+|---|---|---|
+| `eachCount()` | 그룹별 **개수** | `Map<K, Int>` |
+| `fold(초기값) { acc, e -> }` | 초기값부터 접는다 | `Map<K, R>` |
+| `reduce { key, acc, e -> }` | 첫 원소가 초기값 (**키도 받는다**) | `Map<K, S>` |
+| `aggregate { key, acc, e, first -> }` | `acc` 가 nullable 이고 `first` 플래그가 온다 — 앞의 것으로 안 되면 이걸로 다 된다 | `Map<K, R>` |
+
+```kotlin
+orders.groupingBy { it.branch }.eachCount()                            // {A=2, B=1}
+orders.groupingBy { it.branch }.fold(0) { acc, o -> acc + o.amount }   // {A=130, B=50}
+```
+
+넷 중 **`eachCount()` 가 압도적으로 자주 쓰입니다.** 상태별 건수, 에러 코드별 발생 수, 등급별 인원 — Java 에서 `Collectors.groupingBy(f, Collectors.counting())` 을 쓰던 자리가 전부 이겁니다. 돌려주는 `Map<K, Int>` 는 `LinkedHashMap` 이라 **키 순서가 그 키가 처음 나온 순서**이고, 보고서로 나갈 값이면 `toSortedMap()` 을 붙이세요 (아래 연습 5번이 그 모양입니다).
+
+> 리뷰 규칙: **`groupBy { }.mapValues { }` 가 보이면 `mapValues` 안을 보세요.** 리스트를 `size`/`sumOf`/`maxOf` 로 줄이고 있으면 `groupingBy` 가 맞습니다. 리스트 자체를 쓰고 있으면 `groupBy` 가 맞고요.
 
 ## 리뷰 체크리스트
 
@@ -140,9 +171,10 @@ orders.groupingBy { it.branch }.fold(0) { acc, o -> acc + o.amount }        // �
 | `map { }.filterNotNull()` | `mapNotNull { }` |
 | `filter { it is Foo }.map { it as Foo }` | `filterIsInstance<Foo>()` |
 | `filter { }` + `filterNot { }` 두 번 순회 | `partition { }` |
-| `map { }.sum()` | `sumOf { }` |
+| `map { }.sum()` / `map { }.max()` | `sumOf { }` / `maxOf { }` (단 `map { }.average()` 는 대안이 없어 그대로 둔다) |
 | `maxBy { }!!` | `maxByOrNull { } ?: 기본값` |
 | 빈 컬렉션 가능한데 `reduce` | `fold(초기값)` |
+| `groupBy { }.mapValues { it.value.size }` | `groupingBy { }.eachCount()` — 그룹마다 List 를 만들었다 버리지 않는다 |
 
 ## 연습
 

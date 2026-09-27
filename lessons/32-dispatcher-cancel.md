@@ -1,6 +1,6 @@
 # Lesson 32 — 디스패처, 컨텍스트, 취소
 
-Lesson 10에서 "코루틴은 스레드를 반납한다"고 했습니다. 그럼 **누가 어느 스레드에서 실행할지 정하는가?** 그리고 **이미 실행 중인 작업을 어떻게 멈추는가?** 이 둘이 실무에서 사고가 나는 지점입니다.
+Lesson 31에서 "코루틴은 스레드를 반납한다"고 했습니다. 그럼 **누가 어느 스레드에서 실행할지 정하는가?** 그리고 **이미 실행 중인 작업을 어떻게 멈추는가?** 이 둘이 실무에서 사고가 나는 지점입니다.
 
 ## CoroutineContext — 코루틴의 실행 환경
 
@@ -131,6 +131,22 @@ try {
 ```
 
 `NonCancellable`은 **정리 코드 전용 탈출구**입니다. 여기에 일반 로직을 넣으면 취소가 안 되는 좀비 코루틴이 생깁니다.
+
+## 리뷰할 때 보는 것
+
+디스패처는 **주입되는가**, 취소는 **확인되는가** 두 축으로 봅니다.
+
+| 코드에서 보이면 | 이렇게 지적한다 |
+|---|---|
+| `withContext(Dispatchers.IO)` 의 디스패처가 하드코딩 | 테스트에서 바꿀 수 없습니다. `CoroutineDispatcher` 를 생성자로 주입하고 기본값만 `Dispatchers.IO` 로 두세요 |
+| `Dispatchers.Default` 에서 블로킹 I/O(JDBC·파일·블로킹 HTTP) | 코어 수만큼뿐인 풀을 잠재우면 앱 전체의 CPU 작업이 함께 멈춥니다. 블로킹 호출은 `Dispatchers.IO` 로 옮기세요 |
+| 호출자가 `withContext(IO)` 로 감싸서 쓰는 `suspend` 함수 | main-safety 는 함수를 만드는 쪽 책임입니다. 전환을 함수 안으로 넣고 호출자는 그냥 부르게 하죠 |
+| 중단 지점 없이 오래 도는 CPU 루프 | 취소해도 멈추지 않습니다. 루프 조건을 `while (isActive)` 로 바꾸거나 청크마다 `ensureActive()` 를 부르세요. 스코프 리시버가 없는 `suspend` 함수 안이면 `currentCoroutineContext().ensureActive()` |
+| `finally` 안에서 `suspend` 함수 호출 | 이미 취소된 코루틴이라 그 호출이 즉시 예외로 튕기고 정리가 안 됩니다. `withContext(NonCancellable) { }` 로 감싸세요 |
+| `NonCancellable` 블록에 일반 로직이 들어있음 | 취소가 통하지 않는 구간입니다. 정리 코드만 남기고 나머지는 밖으로 빼주세요 |
+| 코루틴 안의 `catch (e: Exception)` | `CancellationException` 도 `Exception` 이라 취소 신호를 삼킵니다. 이 코루틴은 취소 요청을 받고도 계속 돕니다. 구체 타입만 잡거나 `catch (e: CancellationException) { throw e }` 를 위에 두세요 |
+| 외부 API 호출에 타임아웃이 없다 | 상대가 응답을 주지 않으면 우리 코루틴이 영원히 기다립니다. `withTimeoutOrNull(ms)` 로 감싸고 초과 시 동작을 정하세요 |
+| 한 함수에서 `withContext` 가 줄마다 반복 | 전환 비용 자체는 싸지만 어디서 어느 풀을 쓰는지 읽을 수 없습니다. 같은 디스패처 구간은 블록 하나로 묶어주세요 |
 
 ## 연습
 

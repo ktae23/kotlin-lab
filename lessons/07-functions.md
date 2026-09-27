@@ -43,12 +43,21 @@ log("느림", tag = "db")       // level 은 기본값 "INFO" 유지
 
 이 두 문법이 합쳐져서 **빌더 패턴이 필요 없어집니다.** Java에서 `Request.builder().url(x).timeout(3).build()`라고 쓰던 걸 Kotlin에서는 그냥 `Request(url = x, timeout = 3)`로 씁니다. 나머지는 기본값이 받아주니까요.
 
-규칙 하나: **위치 인자를 이름 인자 뒤에 둘 수 없습니다.** 섞을 거면 위치 인자가 먼저입니다.
+규칙 하나가 있는데, Kotlin 1.4에서 완화된 부분이라 옛 자료를 그대로 외우면 틀립니다. "위치 인자는 이름 인자 뒤에 못 온다"가 아니고, **이름 인자 뒤의 위치 인자는 그 인자가 원래 자리에 그대로 있을 때만 허용**됩니다.
+
+```kotlin
+fun createUser(name: String, active: Boolean, admin: Boolean) { ... }
+
+createUser(name = "ada", true, false)     // ✅ true·false 가 2·3번째 자리 그대로
+createUser(active = true, "ada", false)   // ❌ "ada" 는 1번째 파라미터인데 2번째 자리에 있다
+```
+
+어긋나면 이 에러입니다 — `error: mixing named and positional arguments is not allowed unless the order of the arguments matches the order of the parameters`. 허용된다고 해서 권할 일은 아니고요. **한 호출 안에서 두 방식을 섞으면 읽는 사람이 자리를 세게 됩니다.** 이름을 붙이기 시작했으면 끝까지 붙이세요.
 
 ## vararg 와 스프레드
 
 ```kotlin
-fun joinAll(vararg parts: String): String { for (p in parts) ... }
+fun joinAll(vararg parts: String): String = parts.joinToString(" / ")   // parts 는 Array<String>
 
 joinAll("a", "b", "c")
 ```
@@ -122,7 +131,7 @@ fun fail(msg: String): Nothing = throw IllegalStateException(msg)
 val port: Int = config.port ?: throw IllegalStateException("port 없음")
 ```
 
-`?:`의 양쪽 타입이 맞아야 하는데, `throw`가 `Nothing`이라서 `Int` 자리에 들어가도 컴파일러가 받아 줍니다. Lesson 8에서 본 `?: throw` / `?: return` 관용구가 성립하는 근거가 정확히 이것입니다.
+`?:`의 양쪽 타입이 맞아야 하는데, `throw`가 `Nothing`이라서 `Int` 자리에 들어가도 컴파일러가 받아 줍니다. Lesson 8에서 볼 `?: throw` / `?: return` 관용구가 성립하는 근거가 정확히 이것입니다.
 
 직접 만들면 더 유용합니다.
 
@@ -181,9 +190,8 @@ fun formatLog(message: String, level: String = "INFO", tag: String = "app"): Str
 
 // 2) vararg + 이름 인자 (separator 는 vararg 뒤라 이름으로만 넘길 수 있다)
 fun joinAll(vararg parts: String, separator: String = " / "): String {
-    var out = ""
-    // TODO: parts 를 순회하며 separator 로 이어 붙인다. 첫 원소 앞에는 구분자를 넣지 않는다.
-    return out
+    // TODO: parts 를 separator 로 이어 붙인다. 루프로 손수 누적하지 말 것 (Lesson 3 참고)
+    TODO()
 }
 
 // 3) 지역 함수 — 같은 정리 로직을 두 번 쓰되 private 함수를 만들지 말 것
@@ -199,7 +207,7 @@ fun fail(reason: String): Nothing {
     TODO()
 }
 
-fun port(raw: String?): Int {
+fun port(raw: String): Int {
     // TODO: raw 를 Int 로 바꾸되(toIntOrNull), 실패하면 fail("포트 파싱 실패: <raw>")
     //       반환 타입이 Int 인데 fail() 을 쓸 수 있는 이유를 생각해 볼 것
     TODO()
@@ -249,21 +257,21 @@ ada<ada@example.com>
 ```
 
 ```text hint
-`main` 은 이미 완성돼 있으니 **호출부를 먼저 읽으세요.** `formatLog("시작")` 한 번, `level = "WARN"` 한 번, `tag`·`level` 을 순서까지 바꿔 한 번 — 이 세 호출이 한 함수로 받아지는 이유가 기본 인자와 이름 인자입니다. `joinAll(*arrayOf(...))` 의 `*` 는 배열을 펼쳐 넘기는 스프레드고요. 다섯 조각 모두 몸통이 짧아서, 1·3·4·5번은 `= ` 로 시작하는 **표현식 본문**으로 쓸 수 있습니다.
+`main` 은 이미 완성돼 있으니 **호출부를 먼저 읽으세요.** `formatLog("시작")` 한 번, `level = "WARN"` 한 번, `tag`·`level` 을 순서까지 바꿔 한 번 — 이 세 호출이 한 함수로 받아지는 이유가 기본 인자와 이름 인자입니다. `joinAll(*arrayOf(...))` 의 `*` 는 배열을 펼쳐 넘기는 스프레드고요. 다섯 조각 모두 몸통이 짧아서, 지역 함수를 선언해야 하는 3번만 빼면 전부 `= ` 로 시작하는 **표현식 본문**으로 쓸 수 있습니다.
 ---
-쓸 도구입니다. 1번은 문자열 템플릿 `"[$tag] $level $message"`. 2번은 `for ((i, p) in parts.withIndex())` 와 `if (i > 0)`. 3번은 함수 몸통 안에 `fun clean(s: String) = s.trim().lowercase()` 를 선언하고 두 번 호출. 4번은 `throw IllegalArgumentException(reason)` 과 `?:`. 5번은 `if (n == 0) acc else digitSum(___, ___)`.
+쓸 도구입니다. 1번은 문자열 템플릿 `"[$tag] $level $message"`. 2번의 `parts` 는 함수 안에서 그냥 `Array<String>` 입니다 — 컬렉션 함수가 그대로 먹으니 `joinToString` 한 번이면 끝납니다. 3번은 함수 몸통 안에 `fun clean(s: String) = s.trim().lowercase()` 를 선언하고 두 번 호출. 4번은 `throw IllegalArgumentException(reason)` 과 `?:`. 5번은 `if (n == 0) acc else digitSum(___, ___)`.
 ---
-핵심 판단 세 가지. **4번**: `port` 의 반환 타입은 `Int` 인데 `?:` 오른쪽에 `fail(...)` 이 올 수 있는 건 `fail` 이 `Nothing` 을 반환하기 때문입니다 — `Nothing` 은 모든 타입의 하위 타입이라 `Int` 자리에 들어가도 모순이 없어요. 여기서 반환 타입을 `Unit` 으로 적으면 컴파일이 깨집니다. **5번**: 재귀 호출이 **마지막 동작**이어야 `tailrec` 이 먹습니다. `n % 10` 을 호출 결과에 더하지 말고 `acc` 에 더해서 **인자로 밀어 넣으세요** — `acc + n % 10` 을 그대로 넘기는 겁니다. **2번**: 구분자는 원소 **앞**에 붙이되 첫 원소만 빼야 끝에 `" / "` 가 남지 않습니다.
+핵심 판단 세 가지. **4번**: `port` 의 반환 타입은 `Int` 인데 `?:` 오른쪽에 `fail(...)` 이 올 수 있는 건 `fail` 이 `Nothing` 을 반환하기 때문입니다 — `Nothing` 은 모든 타입의 하위 타입이라 `Int` 자리에 들어가도 모순이 없어요. 여기서 반환 타입을 `Unit` 으로 적으면 컴파일이 깨집니다. **5번**: 재귀 호출이 **마지막 동작**이어야 `tailrec` 이 먹습니다. `n % 10` 을 호출 결과에 더하지 말고 `acc` 에 더해서 **인자로 밀어 넣으세요** — `acc + n % 10` 을 그대로 넘기는 겁니다. **2번**: `joinToString` 의 첫 위치 인자가 곧 구분자입니다. 손으로 루프를 돌리면 "첫 원소 앞에는 구분자를 안 붙인다" 같은 경계 처리를 직접 맞춰야 하는데, 그게 Lesson 3에서 없애기로 한 코드입니다.
 ---
 뼈대입니다.
 
 1번: `fun formatLog(...): String = "[$tag] ___ ___"`
 
-2번: `for ((i, p) in parts.withIndex()) { if (i > 0) out += separator; out += ___ }`
+2번: `fun joinAll(vararg parts: String, separator: String = " / "): String = parts.___(separator)`
 
 3번: `fun report(name: String, email: String): String { fun clean(s: String) = s.trim().___(); return "${clean(name)}<___>" }`
 
-4번: `fun fail(reason: String): Nothing = throw ___` / `fun port(raw: String?): Int = raw?.toIntOrNull() ?: ___`
+4번: `fun fail(reason: String): Nothing = throw ___` / `fun port(raw: String): Int = raw.toIntOrNull() ?: ___`
 
 5번: `tailrec fun digitSum(n: Int, acc: Int = 0): Int = if (n == 0) ___ else digitSum(n / 10, ___)`
 ```
@@ -274,14 +282,8 @@ fun formatLog(message: String, level: String = "INFO", tag: String = "app"): Str
     "[$tag] $level $message"
 
 // separator 가 vararg 뒤에 있으므로 호출부에서 이름으로만 넘길 수 있다.
-fun joinAll(vararg parts: String, separator: String = " / "): String {
-    var out = ""
-    for ((i, p) in parts.withIndex()) {
-        if (i > 0) out += separator     // 구분자는 앞에 — 뒤에 붙이면 끝에 남는다
-        out += p
-    }
-    return out
-}
+// vararg 는 함수 안에서 Array<String> 이라 컬렉션 함수가 그대로 먹는다 — 루프를 돌릴 이유가 없다.
+fun joinAll(vararg parts: String, separator: String = " / "): String = parts.joinToString(separator)
 
 // clean 은 report 밖에서는 의미가 없다. 지역 함수로 두면 클래스 API 가 깨끗해진다.
 fun report(name: String, email: String): String {
@@ -292,7 +294,7 @@ fun report(name: String, email: String): String {
 // Nothing 은 모든 타입의 하위 타입이라 ?: 오른쪽 어디에든 놓을 수 있다.
 fun fail(reason: String): Nothing = throw IllegalArgumentException(reason)
 
-fun port(raw: String?): Int = raw?.toIntOrNull() ?: fail("포트 파싱 실패: $raw")
+fun port(raw: String): Int = raw.toIntOrNull() ?: fail("포트 파싱 실패: $raw")
 
 // 누산기를 기본 인자로 둬서 덧셈을 호출 "안"으로 밀어 넣었다 — 그래서 꼬리 재귀가 된다.
 tailrec fun digitSum(n: Int, acc: Int = 0): Int =

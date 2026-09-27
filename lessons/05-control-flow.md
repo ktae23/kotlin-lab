@@ -51,20 +51,19 @@ Kotlin에는 `cond ? a : b`가 없습니다. **`if`가 이미 그 일을 하니�
 ### 인자 있는 when
 
 ```kotlin
-when (code) {
+when (code) {                         // code 는 Int
     200 -> "OK"
     301, 302 -> "리다이렉트"          // 콤마로 여러 값
     in 400..499 -> "클라이언트 오류"   // 범위
     !in 200..599 -> "규격 밖"         // 부정 범위
-    is Int -> "그 외 정수"            // 타입 검사
     else -> "알 수 없음"
 }
 ```
 
 가지는 **위에서 아래로** 검사되고 **처음 맞는 하나만** 실행됩니다. 아래 두 가지를 Java와 비교해 보세요.
 
-- **fall-through가 없습니다.** `break`를 빼먹어 다음 case로 흘러내리는 Java의 고전 버그가 문법적으로 불가능합니다.
-- **분기 대상 타입에 제약이 없습니다.** Java `switch`는 오랫동안 `int`/`String`/`enum`만 받았지만, `when`은 어떤 타입이든 받고 조건도 상수일 필요가 없습니다.
+- **fall-through가 없습니다.** Java도 `case x -> ...` 화살표 형태를 쓰면 흘러내리지 않지만, `case x:` 콜론 형태가 여전히 문법에 남아 있어 섞인 코드베이스에서는 `break` 누락 사고가 계속 납니다. Kotlin에는 흘러내릴 수 있는 형태가 **아예 없습니다.**
+- **주어 타입과 조건에 제약이 없습니다.** Java 21은 패턴을 쓰면 임의의 참조 타입을 주어로 받습니다. 다만 **상수 라벨은 여전히 `int`·`String`·`enum` 계열뿐**이고, `long`·`double`·`boolean` 을 주어로 주면 `selector type long is not allowed` 로 막힙니다. `when`은 주어 타입도, 가지 조건도(`in 400..499`, `limit - 1`) 제한이 없습니다.
 
 ```kotlin
 val limit = readLimit()
@@ -134,16 +133,53 @@ when (code) { 200 -> log("정상") }                        // 문 — else 없�
 
 예외는 하나 있습니다. **분기 대상이 `enum`이나 `sealed` 타입이고 모든 경우를 나열했다면 `else` 없이도 식으로 쓸 수 있습니다.** 이게 Kotlin 타입 설계의 핵심 기법인데, Lesson 13·14에서 제대로 다룹니다. 지금은 아래 리뷰 관점만 기억해 두세요.
 
-## Java switch 대조
+## Java 21 switch 와 대조 — 무엇이 여전히 우위인가
 
-| | Java `switch` | Kotlin `when` |
+여기서 **낡은 지식을 그대로 말하면 면접에서 역지적당합니다.** JDK 21의 `switch`는 10년 전 그 `switch`가 아닙니다. 아래는 실제로 `javac --release 21` 로 컴파일·실행해 본 코드입니다.
+
+```java
+// Java 21 — 이게 전부 됩니다
+static String describe(Object o) {
+    return switch (o) {                                  // switch 식 — 값을 반환한다
+        case Integer i when i > 10 -> "큰 정수 " + i;      // 타입 패턴 + 가드
+        case Integer i -> "정수 " + i;
+        case String s -> "길이 " + s.length();            // 캐스트 없이 s 를 쓴다
+        case null -> "null";
+        default -> "기타";
+    };
+}
+
+sealed interface Shape permits Circle, Square {}          // Circle·Square 는 record
+static String kind(Shape s) {
+    return switch (s) {                                   // default 없이 완전성 검사 통과
+        case Circle c -> "원";
+        case Square q -> "사각형";
+    };
+}
+```
+
+값 반환, 타입 패턴, 가드, 패턴 바인딩(스마트 캐스트에 대응), sealed 완전성 검사 — **Java가 다 따라왔습니다.** 그러니 `when` 의 장점을 이 다섯 개로 설명하면 안 됩니다.
+
+| | Java 21 `switch` | Kotlin `when` |
 |---|---|---|
-| 값 반환 | 불가 (switch 식은 14부터, 제약 있음) | 항상 가능 |
-| fall-through | 기본 동작, `break` 필요 | 없음 |
-| 분기 타입 | `int`·`String`·`enum` 중심 | 제한 없음 |
-| 조건 | 컴파일 타임 상수만 | 임의의 식, 범위, 타입 |
-| 주어 없는 형태 | 없음 | `when { cond -> ... }` |
-| 완전성 검사 | 약함 | enum·sealed 에서 강제 |
+| 값 반환 | 가능 (`->` 식 형태, 블록이면 `yield`) | 가능 |
+| 타입 패턴 + 바인딩 | `case String s ->` | `is String ->` (주어를 그대로 쓴다) |
+| 가드 | `case Integer i when i > 10 ->` | 주어 없는 `when`, 또는 `is` 가지 안의 `if` |
+| enum·sealed 완전성 | 강제 — `default` 없이 통과한다 | 강제 |
+| fall-through | `->` 형태는 없음. `:` 형태는 **남아 있음** | 형태 자체가 없음 |
+| 주어 타입 | 패턴이면 임의의 참조 타입. `long`·`double`·`boolean` 은 **불가** | 제한 없음 |
+| 범위 가지 | 없음 — 가드로 `when i >= 400 && i <= 499` | `in 400..499`, `!in 200..599` |
+| 주어 없는 형태 | 없음 (`if / else if` 로 내려간다) | `when { cond -> ... }` |
+| 주어를 변수로 캡처 | 없음 | `when (val x = ...)` |
+| 식이 기본인가 | 문이 기본 | 어느 쪽이든 자연스럽다 |
+
+**그래서 남은 실제 우위는 이 다섯 개입니다.** 면접에서는 이것만 말하세요.
+
+1. **주어 없는 `when { }`** — Java에 대응물이 없습니다. `if / else if` 체인으로 내려가야 하고, 그러면 조건의 세로 정렬이 깨집니다.
+2. **`in`/범위 가지** — `in 400..499`, `!in 200..599`, `in listOf(...)`. Java는 가드 안에 부등식을 손으로 씁니다.
+3. **식이 기본값** — Kotlin은 `val x = when ...` 이 첫 선택입니다. Java는 문이 기본이라 "식으로 쓸 수도 있다"에 머물고, 그래서 실무 코드에는 여전히 문 형태가 압도적으로 많습니다.
+4. **fall-through 가 문법에 없음** — Java는 안전한 화살표 형태를 **골라야** 합니다. 고를 수 있다는 건 안 고를 수도 있다는 뜻이고, 리뷰에서 그걸 봐야 한다는 뜻입니다.
+5. **`when (val x = ...)` 캡처** — 주어를 계산하면서 그 값을 가지 안에서 쓰고, 수명을 `when` 블록으로 한정합니다. Java는 밖에 변수를 선언해야 합니다.
 
 ## 리뷰에서 이렇게 지적한다
 

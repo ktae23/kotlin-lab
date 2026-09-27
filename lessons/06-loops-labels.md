@@ -247,6 +247,8 @@ fun sumUntil(limit: Int): Int {
     return sum
 }
 
+// 실무라면 words.withIndex().joinToString(", ") { "${it.index}:${it.value}" } 한 줄이다.
+// 여기서는 withIndex 와 루프 본문을 손으로 돌려 보는 게 목적이라 일부러 누적한다.
 fun indexed(words: List<String>): String {
     var out = ""
     for ((i, w) in words.withIndex()) {  // 쌍을 바로 구조 분해해서 받는다

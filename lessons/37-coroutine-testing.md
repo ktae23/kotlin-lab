@@ -58,7 +58,7 @@ fun `백오프 3회는 6초가 걸린다`() = runTest {
 | 함수 | 하는 일 |
 |---|---|
 | `runCurrent()` | **현재 가상 시각에 예약된 것만** 실행. 시간은 안 움직인다 |
-| `advanceTimeBy(ms)` | 가상 시계를 `ms` 만큼 전진시키며 그 사이 예약된 것들을 실행 |
+| `advanceTimeBy(ms)` | 가상 시계를 `ms` 만큼 전진시키며 그 사이 예약된 것들을 실행. 구간이 **반열린** `현재..<현재+ms` 라 **경계 시각 예약은 실행하지 않는다** |
 | `advanceUntilIdle()` | 큐가 빌 때까지 전부 실행. 시계는 마지막 예약 시각까지 점프 |
 
 ```kotlin
@@ -177,7 +177,7 @@ job.cancel()
 - `delay(ms)` — `suspendCoroutine` 으로 코루틴을 멈추고, `(현재시각 + ms, 순번, 이어갈 continuation)` 을 예약 목록에 넣는다
 - `runNext()` — 예약 중 **가장 이른 것**(동점이면 순번이 작은 것)을 꺼내 `currentTime` 을 그 시각으로 옮기고 재개한다
 - `advanceUntilIdle()` — 예약이 빌 때까지 반복
-- `advanceTimeBy(ms)` — 목표 시각 이하인 예약만 실행하고, 마지막에 시계를 **목표 시각까지** 맞춘다
+- `advanceTimeBy(ms)` — 목표 시각 **직전까지**(`현재..<현재+ms`, 경계 시각은 제외) 예약된 것만 실행하고, 마지막에 시계를 **목표 시각까지** 맞춘다
 
 그리고 `RetryClient` 는 `delay` 를 직접 부르지 않고 **`sleep` 을 주입**받습니다. 테스트에서는 가상 시계를, 프로덕션에서는 진짜 `delay` 를 넣는 구조예요.
 
@@ -213,7 +213,7 @@ class TestScheduler {
     fun advanceUntilIdle() {
     }
 
-    // TODO: 목표 시각까지만. 마지막에 currentTime 을 목표 시각으로 맞춘다
+    // TODO: 목표 시각 직전까지만(경계 시각 제외). 마지막에 currentTime 을 목표 시각으로 맞춘다
     fun advanceTimeBy(ms: Long) {
     }
 }
@@ -265,9 +265,9 @@ fun main() = runBlocking {
 ```text hint
 가장 중요한 감각부터. **`delay` 는 기다리는 게 아니라 "나를 나중에 깨워달라"고 등록하고 멈추는 것**입니다. 그 "나"에 해당하는 물건이 `Continuation` 이고, `suspendCoroutine { cont -> ... }` 이 그걸 손에 쥐여줍니다. 블록 안에서 `cont` 를 어딘가 보관만 하고 리턴하면 코루틴은 **멈춘 채로** 남아요. 나중에 `cont.resume(Unit)` 을 부르는 순간 멈췄던 그 줄 다음부터 이어집니다. 시계를 "진행시킨다"는 건 결국 **보관해둔 continuation 을 순서대로 깨우는 것**뿐입니다.
 ---
-쓸 도구는 import 에 다 있습니다. `suspendCoroutine { cont -> pending += Scheduled(currentTime + ms, seq++, cont) }`, 그리고 재개는 `cont.resume(Unit)`. 가장 이른 예약을 고르는 건 기준이 둘(`at`, `seq`)이라 `pending.minWithOrNull(compareBy({ it.at }, { it.seq }))` 입니다. `advanceTimeBy` 는 `while (pending.any { it.at <= target }) runNext()` 로 돌리세요. `RetryClient.fetch` 는 `repeat(failTimes) { i -> attempts++; sleep(1000L * (i + 1)) }` 뒤에 `attempts++` 하고 `"OK"` 를 반환합니다.
+쓸 도구는 import 에 다 있습니다. `suspendCoroutine { cont -> pending += Scheduled(currentTime + ms, seq++, cont) }`, 그리고 재개는 `cont.resume(Unit)`. 가장 이른 예약을 고르는 건 기준이 둘(`at`, `seq`)이라 `pending.minWithOrNull(compareBy({ it.at }, { it.seq }))` 입니다. `advanceTimeBy` 는 `while (pending.any { it.at < target }) runNext()` 로 돌리세요 — 부등호가 `<=` 가 아니라 `<` 입니다. `RetryClient.fetch` 는 `repeat(failTimes) { i -> attempts++; sleep(1000L * (i + 1)) }` 뒤에 `attempts++` 하고 `"OK"` 를 반환합니다.
 ---
-함정 셋. ① `runNext` 안의 순서가 중요합니다 — **`currentTime` 을 먼저 옮기고 나서** `resume` 해야 합니다. 반대로 하면 재개된 코루틴이 읽는 `currentTime` 이 옛날 값이라 `@300ms` 가 `@0ms` 로 찍혀요. ② `resume` 을 부르면 그 코루틴이 **그 자리에서 동기적으로** 이어 달리다가 또 `delay` 를 만나 `pending` 에 추가할 수 있습니다. 그래서 목록을 for 로 순회하면 안 되고, **매번 최솟값을 다시 고르는** 루프여야 합니다. ③ `advanceTimeBy(500)` 은 300ms 예약만 실행하지만 시계는 **500ms** 여야 합니다 — 루프가 끝난 뒤 `currentTime = target` 을 한 번 더 찍어주세요. ④ `seq` 는 같은 시각에 예약된 둘의 순서를 고정해 **출력을 결정적으로** 만드는 장치입니다.
+함정 셋. ① `runNext` 안의 순서가 중요합니다 — **`currentTime` 을 먼저 옮기고 나서** `resume` 해야 합니다. 반대로 하면 재개된 코루틴이 읽는 `currentTime` 이 옛날 값이라 `@300ms` 가 `@0ms` 로 찍혀요. ② `resume` 을 부르면 그 코루틴이 **그 자리에서 동기적으로** 이어 달리다가 또 `delay` 를 만나 `pending` 에 추가할 수 있습니다. 그래서 목록을 for 로 순회하면 안 되고, **매번 최솟값을 다시 고르는** 루프여야 합니다. ③ `advanceTimeBy(500)` 은 300ms 예약만 실행하지만 시계는 **500ms** 여야 합니다 — 루프가 끝난 뒤 `currentTime = target` 을 한 번 더 찍어주세요. 그리고 **경계 시각은 포함하지 않습니다**(`<=` 아니라 `<`). 실제 `advanceTimeBy` 도 KDoc 그대로 `currentTime()..<currentTime() + delayTimeMillis` 라는 **반열린 구간**이라, 정확히 `현재+ms` 에 예약된 작업은 남겨 둡니다 — 그게 `advanceUntilIdle()` 과의 차이예요. ④ `seq` 는 같은 시각에 예약된 둘의 순서를 고정해 **출력을 결정적으로** 만드는 장치입니다.
 ---
 뼈대입니다. 빈칸만 채우면 돼요.
 
@@ -277,7 +277,7 @@ fun main() = runBlocking {
 
 `fun advanceUntilIdle() { while (___()) { } }`
 
-`fun advanceTimeBy(ms: Long) { val target = currentTime + ms; while (pending.any { it.at <= ___ }) runNext(); currentTime = ___ }`
+`fun advanceTimeBy(ms: Long) { val target = currentTime + ms; while (pending.any { it.at < ___ }) runNext(); currentTime = ___ }`
 
 `suspend fun fetch(failTimes: Int): String { repeat(failTimes) { i -> attempts++; sleep(___) }; attempts++; return "OK" }`
 ```
@@ -322,9 +322,11 @@ class TestScheduler {
         while (runNext()) { /* 예약이 빌 때까지 */ }
     }
 
+    // 반열린 구간이다 — 경계 시각(target)에 예약된 것은 남겨 둔다.
+    // 실제 advanceTimeBy 도 currentTime()..<currentTime()+ms 라 여기가 advanceUntilIdle 과 갈린다.
     fun advanceTimeBy(ms: Long) {
         val target = currentTime + ms
-        while (pending.any { it.at <= target }) runNext()
+        while (pending.any { it.at < target }) runNext()
         currentTime = target
     }
 }

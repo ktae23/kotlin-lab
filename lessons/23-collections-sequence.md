@@ -79,6 +79,15 @@ users.filter { it.id in blockedSet }     // O(n)
 
 루프 안에서 리스트를 `contains` 하는 코드는 실무 성능 이슈의 단골입니다.
 
+**위에서 `teamB.toSet()` 을 붙인 이유가 바로 이것입니다.** `intersect`/`subtract` 의 시그니처는 `other: Iterable<T>` 인데, stdlib 은 인자를 `Set` 으로 바꿔주지 **않습니다.** 구현은 인자를 `Collection` 으로만 맞춘 뒤(`convertToListIfNotCollection()`) 원소마다 `contains` 를 호출해요. 즉 `List` 를 넘기면 그 `contains` 가 전부 `O(n)` 이 됩니다.
+
+```kotlin
+teamA.intersect(teamB)            // ❌ List 를 그대로 넘기면 O(n*m)
+teamA.intersect(teamB.toSet())    // ✅ O(n+m)
+```
+
+각 2만 개로 재보면 `List` 274ms vs `Set` 5ms 였습니다. 타입은 `Iterable` 이라 컴파일러가 잡아주지 않으니, **리뷰에서 `intersect`/`subtract` 인자가 `List` 인지 보세요.**
+
 ## 읽기 전용은 불변이 아니다
 
 ```kotlin
@@ -128,7 +137,8 @@ huge.asSequence()
 | `first`/`find`/`take`/`any` 로 조기 종료 | Sequence 이득 (가장 큼) |
 | 원소 수십~수백 개 | **리스트가 빠르다** — 래퍼·이터레이터 오버헤드만 늘어난다 |
 | 단계가 하나뿐 | 의미 없음 |
-| `sorted`/`groupBy` 가 중간에 낌 | 그 지점에서 어차피 전부 모인다 |
+| `sorted` 가 낀다 | `sorted` 는 상태를 다 모아야 하니 그 앞 단계의 지연 평가 이득이 사라진다 |
+| `groupBy` 를 부른다 | `Sequence.groupBy` 는 **종단 연산**(`Map` 을 반환)이라 체인이 거기서 끝난다 |
 
 작은 컬렉션에 `asSequence()`를 붙여놓고 "최적화했습니다"라고 하는 PR은 오히려 되돌려야 합니다.
 

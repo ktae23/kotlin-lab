@@ -8,7 +8,7 @@
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter-web")
     api("com.example:order-contract")
-    compileOnly("org.projectlombok:lombok")
+    compileOnly("jakarta.servlet:jakarta.servlet-api")
     runtimeOnly("org.postgresql:postgresql")
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     ksp("com.google.dagger:dagger-compiler")
@@ -67,7 +67,7 @@ dependencies {
 # gradle/libs.versions.toml
 [versions]
 kotlin = "2.0.21"
-springBoot = "3.3.4"
+springBoot = "3.3.5"
 jackson = "2.17.2"
 
 [libraries]
@@ -97,13 +97,13 @@ plugins {
 
 **별칭의 `-` 가 접근자에서 `.` 이 됩니다.** `spring-boot-starter-web` → `libs.spring.boot.starter.web`. 이 접근자는 Gradle이 **생성한 타입 안전 코드**라서, 오타를 내면 스크립트 컴파일이 실패하고 IDE가 자동완성해 줍니다. 문자열 좌표를 손으로 적는 것과 근본적으로 다릅니다.
 
-`version.ref`로 묶어 두면 Spring Boot를 3.3.4 → 3.4.0으로 올릴 때 **TOML 한 줄**만 고칩니다. 열 개 모듈을 뒤질 필요가 없어요.
+`version.ref`로 묶어 두면 Spring Boot를 3.3.5 → 3.4.0으로 올릴 때 **TOML 한 줄**만 고칩니다. 열 개 모듈을 뒤질 필요가 없어요.
 
 ## BOM / platform — 버전을 아예 안 적는 방법
 
 ```kotlin
 dependencies {
-    implementation(platform("org.springframework.boot:spring-boot-dependencies:3.3.4"))
+    implementation(platform("org.springframework.boot:spring-boot-dependencies:3.3.5"))
     implementation("org.springframework.boot:spring-boot-starter-web")   // 버전 없음
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin") // 버전 없음
 }
@@ -118,6 +118,8 @@ BOM(Bill of Materials)은 **"이 라이브러리들은 이 버전으로 써라"�
 A는 `jackson-databind:2.15.0`을, B는 `2.17.2`를 끌고 옵니다. Gradle의 기본 전략은 **가장 높은 버전 선택(newest wins)** 입니다. Maven의 "가장 가까운 것 우선"과 다릅니다.
 
 여기서 주의할 게 하나 있어요. **버전 비교는 문자열 비교가 아닙니다.** `4.1.9` 와 `4.1.100` 을 문자열로 비교하면 `9 > 1` 이라 `4.1.9`가 이깁니다. 실제로는 세그먼트를 숫자로 끊어서 비교하므로 `4.1.100`이 이깁니다. 오늘 연습에서 이걸 직접 구현합니다.
+
+단, 숫자 세그먼트 비교는 **규칙의 일부**입니다. `-SNAPSHOT`, `-rc1` 같은 한정자(qualifier)가 붙으면 Gradle 은 숫자 뒤의 그 꼬리까지 봐서 `2.0.0-SNAPSHOT < 2.0.0` 으로 판정하고, 한정자끼리는 `dev < rc < release < final < ga < sp` 순서가 정해져 있습니다. 오늘 구현은 **숫자 세그먼트만** 다루는 축소판이에요.
 
 억지로 맞춰야 할 때:
 
@@ -167,7 +169,7 @@ data class Library(val group: String, val name: String, val versionRef: String)
 // gradle/libs.versions.toml 의 [versions] / [libraries] 를 맵으로 옮긴 것
 val versions = mapOf(
     "kotlin" to "2.0.21",
-    "springBoot" to "3.3.4",
+    "springBoot" to "3.3.5",
     "jackson" to "2.17.2",
 )
 
@@ -226,7 +228,7 @@ fun main() {
 ```text expected
 [버전 카탈로그]
 libs.kotlin.reflect = org.jetbrains.kotlin:kotlin-reflect:2.0.21
-libs.spring.boot.starter.web = org.springframework.boot:spring-boot-starter-web:3.3.4
+libs.spring.boot.starter.web = org.springframework.boot:spring-boot-starter-web:3.3.5
 libs.jackson.module.kotlin = com.fasterxml.jackson.module:jackson-module-kotlin:2.17.2
 
 [컴파일 클래스패스 — api 만 전이된다]
@@ -262,7 +264,7 @@ data class Library(val group: String, val name: String, val versionRef: String)
 // gradle/libs.versions.toml 의 [versions] / [libraries] 를 맵으로 옮긴 것
 val versions = mapOf(
     "kotlin" to "2.0.21",
-    "springBoot" to "3.3.4",
+    "springBoot" to "3.3.5",
     "jackson" to "2.17.2",
 )
 
@@ -306,6 +308,7 @@ fun compileClasspath(module: String): List<String> {
 }
 
 // 문자열 비교면 "4.1.9" 가 "4.1.100" 을 이긴다. 세그먼트를 숫자로 끊어야 한다.
+// (축소판이다 — 실제 Gradle 은 -SNAPSHOT/-rc 같은 한정자까지 보고 2.0.0-SNAPSHOT < 2.0.0 으로 판정한다)
 fun compareVersions(a: String, b: String): Int {
     val left = a.split(".")
     val right = b.split(".")

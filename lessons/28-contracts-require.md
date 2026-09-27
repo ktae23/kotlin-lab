@@ -9,7 +9,7 @@
 | `require(cond) { msg }` | **인자(argument)** | `IllegalArgumentException` | **호출자** |
 | `check(cond) { msg }` | **상태(state)** | `IllegalStateException` | **자기 자신 / 호출 순서** |
 | `error(msg)` | **도달 불가** | `IllegalStateException` | 프로그래머(분기 누락) |
-| `assert(cond) { msg }` | 내부 가정 | `AssertionError` | — **기본 비활성** |
+| `assert(cond) { msg }` | 내부 가정 | `AssertionError` | — **기본 비활성(단, 조건식은 평가된다)** |
 
 ```kotlin
 class Order(private val items: List<Item>) {
@@ -39,7 +39,27 @@ val fee = when (grade) {
 }
 ```
 
-`assert`는 JVM의 `-ea` 플래그가 없으면 **아예 실행되지 않습니다.** 프로덕션에서는 보통 꺼져 있죠. 그래서 "있으면 좋은 추가 검사"에만 쓰고, **반드시 지켜야 하는 계약에는 절대 쓰지 마세요.**
+`assert`는 JVM의 `-ea` 플래그가 없으면 **검사를 하지 않습니다.** 프로덕션에서는 보통 꺼져 있죠. 그래서 "있으면 좋은 추가 검사"에만 쓰고, **반드시 지켜야 하는 계약에는 절대 쓰지 마세요.**
+
+그런데 Java 개발자가 반드시 틀리는 지점이 하나 있습니다. **Kotlin 의 `assert` 는 언어 구문이 아니라 그냥 함수입니다.**
+
+```kotlin
+public inline fun assert(value: Boolean, lazyMessage: () -> Any) {
+    if (_Assertions.ENABLED) {      // 함수 안에서 검사한다
+        if (!value) throw AssertionError(lazyMessage())
+    }
+}
+```
+
+`value: Boolean` 이 **일반 파라미터**예요. 그래서 `-ea` 가 없어도 **조건식은 항상 평가됩니다.** 꺼지는 건 `throw` 뿐입니다. Java 의 `assert` 는 바이트코드 레벨에서 조건식 자체를 건너뛰지만, Kotlin 은 그렇지 않습니다.
+
+```kotlin
+assert(repo.countAll() == expected)   // 검사는 안 하는데 쿼리는 매번 날아간다
+```
+
+실제로 재보면 assertions 가 꺼진 상태에서도 `countAll()` 호출 횟수가 1 입니다. **검사 효과는 0, 비용은 그대로** — 최악의 조합이에요. 부수효과나 비싼 계산이 조건식에 들어가면 `-ea` 없이도 프로덕션 성능을 먹습니다. 조건이 비싸다면 `if (조건검사가필요한가) { ... }` 로 직접 감싸거나, 애초에 `check`/`require` 로 항상 켜두세요.
+
+(`lazyMessage` 는 람다라서 진짜로 지연됩니다. 문제는 조건식입니다.)
 
 ## requireNotNull / checkNotNull — 검사 + 스마트 캐스트
 
@@ -119,9 +139,12 @@ public inline fun <T : Any> requireNotNull(value: T?): T {
 내 함수에도 붙일 수 있습니다.
 
 ```kotlin
-@kotlin.contracts.ExperimentalContracts
+import kotlin.contracts.ExperimentalContracts
+import kotlin.contracts.contract
+
+@OptIn(ExperimentalContracts::class)
 fun validate(s: String?) {
-    kotlin.contracts.contract { returns() implies (s != null) }
+    contract { returns() implies (s != null) }
     requireNotNull(s) { "s must not be null" }
 }
 
@@ -131,12 +154,21 @@ fun use(s: String?) {
 }
 ```
 
+`@OptIn(ExperimentalContracts::class)` 와 `@ExperimentalContracts` 를 섞어 쓰지 마세요. **마커 애노테이션(`@ExperimentalContracts`)을 함수에 직접 붙이면 옵트인이 전파됩니다** — `validate` 자신이 실험적 API 가 되어, 호출하는 `use` 에도 같은 표시를 요구하고 호출자의 호출자까지 번집니다. 위 코드도 그렇게 쓰면 이렇게 막힙니다.
+
+```
+error: this declaration needs opt-in. Its usage must be marked with
+'@kotlin.contracts.ExperimentalContracts' or '@OptIn(kotlin.contracts.ExperimentalContracts::class)'
+```
+
+`@OptIn` 은 "나는 실험적 API 를 쓰겠다"는 **내 선언 안에서 끝나는 소비 표시**라 전파되지 않습니다. contract 를 쓰는 함수는 거의 항상 이쪽이 맞습니다.
+
 주로 쓰는 형태는 두 가지입니다.
 
 - `returns() implies (x != null)` — 정상 반환 시 조건이 참
 - `callsInPlace(block, InvocationKind.EXACTLY_ONCE)` — 람다가 정확히 한 번 호출됨 (그래서 `let`/`run` 블록 안에서 `val`을 초기화할 수 있다)
 
-아직 실험적 API라 `@OptIn`이 필요합니다. **직접 쓸 일은 드물지만, 왜 `requireNotNull` 뒤에 `!!`가 필요 없는지** 는 알고 계세요.
+아직 실험적 API라 위처럼 `@OptIn(ExperimentalContracts::class)` 이 필요합니다. **직접 쓸 일은 드물지만, 왜 `requireNotNull` 뒤에 `!!`가 필요 없는지** 는 알고 계세요.
 
 ## 리뷰에서 잡아야 할 것
 
@@ -144,7 +176,7 @@ fun use(s: String?) {
 - **인자 검증에 `check`, 상태 검증에 `require`** — 의미가 반대로 기록되고 HTTP 매핑이 틀어집니다.
 - **검증 없이 nullable을 `!!` 로 통과** — `!!`는 "검증했다"가 아니라 "검증을 포기했다"입니다. 터졌을 때 메시지가 없어서 원인 파악이 안 됩니다. `requireNotNull(x) { "왜 있어야 하는지" }` 로 바꾸세요.
 - **메시지 없는 `require(cond)`** — 공짜인데 안 쓸 이유가 없습니다.
-- **`assert` 로 계약 검증** — 프로덕션에서 꺼져 있습니다.
+- **`assert` 로 계약 검증** — 프로덕션에서 꺼져 있습니다. 더 나쁜 건 **꺼져 있어도 조건식은 평가된다**는 것 — `assert(repo.count() == n)` 은 검사는 안 하면서 쿼리는 계속 날립니다. 계약이면 `check`/`require` 로 올리세요.
 - **같은 검증을 메서드마다 반복** — `init`으로 올리세요.
 - **`require` 로 비즈니스 실패 표현** — "잔액 부족"은 프로그래머 실수가 아니라 **예상 가능한 도메인 실패**입니다. sealed 결과 타입이 맞습니다 (Lesson 27). `require`는 **계약 위반** 전용이에요.
 

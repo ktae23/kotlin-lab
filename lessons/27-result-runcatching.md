@@ -21,7 +21,9 @@ r.getOrElse { ex -> -1 }        // 실패면 람다로 대체 (예외를 인자�
 r.getOrDefault(-1)              // 실패면 그냥 기본값 (예외를 못 본다)
 ```
 
-`Result<T>`는 **value class**입니다. 성공일 때는 박싱 없이 값 자체를 들고 있어서, 할당 비용이 거의 없어요. 실패일 때만 내부 `Failure` 래퍼를 만듭니다.
+`Result<T>`는 **value class**입니다. 성공일 때 `Result` **래퍼 객체는 만들어지지 않고** 값이 그대로 흐릅니다. 실패일 때만 내부 `Failure` 래퍼를 만들고요.
+
+다만 "박싱이 전혀 없다"는 건 과장입니다. `fun makeIntResult(): Result<Int> = Result.success(42)` 를 javap 로 까보면 시그니처는 `()Ljava/lang/Object;` 로 지워지고, 본문은 `Integer.valueOf(42)` 를 호출합니다. value class 의 기반 타입이 `Any?` 라서 `Int` 가 결국 박싱되는 거예요. 즉 **`Result` 래퍼는 사라지지만 원시 타입 값은 박싱됩니다.** 그리고 이 지워진 시그니처가 아래 함정 2의 Java 상호운용 문제로 이어집니다.
 
 ## runCatching — try/catch 를 값으로
 
@@ -106,7 +108,38 @@ suspend fun <T> suspendRunCatching(block: suspend () -> T): Result<T> =
 try { client.get(url) } catch (e: java.io.IOException) { ... }
 ```
 
-코루틴은 뒤에서 제대로 다룹니다. 지금은 **"`runCatching` + suspend = 버그"** 만 외워두세요.
+(a) 를 쓸 때 `catch (e: CancellationException) { throw e }` 대신 **`currentCoroutineContext().ensureActive()`** 를 쓰는 형태가 더 튼튼합니다.
+
+```kotlin
+suspend fun <T> suspendRunCatching(block: suspend () -> T): Result<T> =
+    try {
+        Result.success(block())
+    } catch (e: Throwable) {
+        currentCoroutineContext().ensureActive()   // 취소됐으면 여기서 CancellationException 을 다시 던진다
+        Result.failure(e)
+    }
+```
+
+차이는 이겁니다. 취소된 스코프에서 블록이 `CancellationException` **이 아닌** 예외를 던지면(취소 직후 리소스가 닫혀 `IOException` 이 나는 식) 타입만 보는 `catch` 는 그걸 실패로 포장해 넘깁니다. `ensureActive()` 는 예외 타입이 아니라 **현재 Job 의 상태**를 보므로 그 구멍이 없어요.
+
+그리고 **`suspend` 호출이 없어도 같은 문제가 생깁니다.**
+
+```kotlin
+launch {
+    runCatching {
+        rows.forEach { row ->
+            currentCoroutineContext().ensureActive()   // 직접 취소를 확인해도
+            heavyCpuWork(row)                          // suspend 가 아니다
+        }
+    }
+}
+```
+
+`ensureActive()` 가 던진 `CancellationException` 을 바로 감싼 `runCatching` 이 먹습니다. `Thread.sleep`, JDBC 호출, 파일 I/O 처럼 **블로킹 코드를 코루틴 안에서 돌리는 경우**도 같습니다 — `InterruptedException` 이나 취소 확인 예외가 전부 `Result.failure` 로 흡수돼요.
+
+> 그래서 리뷰 규칙은 "suspend 호출을 감쌌는가" 보다 **"이 `runCatching` 이 코루틴 안에서 도는가"** 가 정확합니다.
+
+코루틴은 뒤에서 제대로 다룹니다. 지금은 **"`runCatching` + 코루틴 = 취소 깨짐"** 만 외워두세요.
 
 ## 함정 2 — 반환 타입으로 쓰기
 
@@ -114,7 +147,7 @@ try { client.get(url) } catch (e: java.io.IOException) { ... }
 
 - `Result<T>`는 **실패 이유를 `Throwable`로만** 표현합니다. 도메인 실패의 종류를 구분하려면 예외 클래스 계층을 만들고 `when (e) { is A -> ... }` 로 타입 검사를 해야 하는데, **컴파일러가 완전성을 검사해주지 않습니다.**
 - `Result`는 `map`/`fold` 같은 표준 함수만 가집니다. 도메인 언어가 아니에요.
-- 공개 API 시그니처에 `Result<T>`가 있으면 Java 호출자가 거의 못 씁니다 (value class라 이름이 뭉개집니다).
+- 공개 API 시그니처에 `Result<T>`가 있으면 Java 호출자가 거의 못 씁니다. **반환 타입**일 때의 이유는 위에서 본 것 — 시그니처가 `Object` 로 지워져서, Java 쪽에서는 `Result` 라는 타입 자체가 보이지 않고 값을 꺼낼 방법도 없습니다. (value class 를 **파라미터**로 받을 때 생기는 `-impl` 이름 맹글링은 별개 문제입니다. 그때는 메서드 이름이 `foo-abc123` 처럼 변해 Java 에서 호출할 수 없게 됩니다.)
 
 ## Result vs 직접 만든 sealed 결과 타입
 
@@ -151,7 +184,7 @@ when (result) {
 
 ## 리뷰에서 잡아야 할 것
 
-- **`runCatching` 을 suspend 블록에 감싸기** — 취소가 깨집니다. 위의 함정 1.
+- **코루틴 안에서 `runCatching`** — suspend 호출이 있든 없든 취소가 깨집니다. `currentCoroutineContext().ensureActive()` 를 `catch` 안에 넣거나, 잡을 예외를 특정하세요. 위의 함정 1.
 - **도메인 실패에 `Result<T>` 남용** — 실패 종류가 둘 이상이면 sealed로 가세요.
 - **`getOrNull()` 로 실패 원인 버리기** — 로그에 "실패했습니다"만 남고 왜인지가 사라집니다. 원인이 필요 없으면 애초에 `T?`를 반환하는 함수로 만드세요.
 - **`runCatching { }.getOrThrow()`** — 감쌌다가 바로 다시 던지는 건 아무 의미가 없습니다. `try` 없이 그냥 호출하세요.
@@ -216,13 +249,13 @@ not-a-number 'abc'
 ---
 `describe`: `runCatching { }` 안에서 `toInt()` 를 부르고, 음수 검증은 `mapCatching { }` 안에서 합니다 — `map` 이 아니라 `mapCatching` 인 이유는 **블록에서 던진 예외를 다시 failure 로 받기** 위해서입니다. 마지막은 `fold(onSuccess = { }, onFailure = { })`. 실패 쪽 람다의 인자는 `Throwable` 이고, 클래스 이름은 `it::class.simpleName` 으로 꺼냅니다.
 ---
-`toWonOrZero`: `recover { }` 는 **실패일 때만** 실행되어 `Result` 를 성공으로 되돌립니다. 복구가 끝났으니 더 실패할 일이 없고, 그래서 `getOrThrow()` 로 꺼내도 안전합니다. `classify`: 여기서는 예외를 만들지 마세요. `toIntOrNull()` 이 null 을 주면 `NotANumber`, 음수면 `Negative`, 아니면 `Valid` — `?: return` 패턴이 잘 맞습니다.
+`toWonOrZero`: `recover { }` 는 **실패일 때만** 실행되어 `Result` 를 성공으로 되돌립니다. 복구가 끝났으니 더 실패할 일이 없고, 그래서 `getOrThrow()` 로 꺼내도 안전합니다 — 리뷰 목록의 "`runCatching { }.getOrThrow()` 는 의미 없다"에 걸리는 건 **복구 없이** 감싸자마자 다시 던지는 코드입니다. 이번 연습은 `recover` 가 무슨 일을 하는지 보는 게 목적이라 일부러 이렇게 풀어 씁니다. 실무에서 같은 결과가 필요하면 `getOrElse { 0 }` 한 줄이 맞습니다. `classify`: 여기서는 예외를 만들지 마세요. `toIntOrNull()` 이 null 을 주면 `NotANumber`, 음수면 `Negative`, 아니면 `Valid` — `?: return` 패턴이 잘 맞습니다.
 ---
 뼈대입니다.
 
 `describe`: `return runCatching { raw.trim().___() }.mapCatching { require(it >= 0) { "negative" }; it }.fold(onSuccess = { "ok=$it" }, onFailure = { "fail=${it::class.___}" })`
 
-`toWonOrZero`: `return runCatching { raw.trim().toInt() }.___ { 0 }.getOrThrow()`
+`toWonOrZero`: `return runCatching { raw.trim().toInt() }.___ { 0 }.getOrThrow()` (실무 축약형인 `getOrElse { 0 }` 가 아니라, 빈칸에는 **실패를 성공으로 되돌리는** 함수가 들어갑니다)
 
 `classify`: `val n = raw.trim().___() ?: return Amount.NotANumber(raw)` 다음 줄에 `return if (n < 0) ___ else ___`
 ```
@@ -249,6 +282,11 @@ fun describe(raw: String): String =
             onFailure = { "fail=${it::class.simpleName}" },
         )
 
+// recover 로 실패를 성공으로 되돌린 뒤 꺼낸다.
+// 실무라면 `raw.trim().toIntOrNull() ?: 0` 이나 `.getOrElse { 0 }` 한 줄로 끝낼 자리다.
+// 이 레슨의 리뷰 규칙("runCatching { }.getOrThrow() 는 아무 의미 없다")과 겹쳐 보이지만,
+// 여기 getOrThrow() 는 recover 가 실패를 없앤 뒤라 절대 던지지 않는다 — recover 의 의미를
+// 눈으로 보려고 일부러 풀어쓴 것이고, 이 형태를 PR 에서 보면 getOrElse 로 줄이라고 지적하면 된다.
 fun toWonOrZero(raw: String): Int =
     runCatching { raw.trim().toInt() }
         .recover { 0 }

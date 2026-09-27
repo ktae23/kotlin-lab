@@ -20,7 +20,7 @@ class UserController(
 }
 ```
 
-생성자 주입(Lesson 17)이 그대로 오고, 핸들러는 **식 본문 한 줄**이 됩니다. `ResponseEntity`는 헤더나 상태 코드를 직접 만져야 할 때만 쓰세요. 대부분은 반환 타입을 DTO로 두는 쪽이 읽기 좋습니다.
+생성자 주입(L43)이 그대로 오고, 핸들러는 **식 본문 한 줄**이 됩니다. `ResponseEntity`는 헤더나 상태 코드를 직접 만져야 할 때만 쓰세요. 대부분은 반환 타입을 DTO로 두는 쪽이 읽기 좋습니다.
 
 ## 요청/응답 DTO 는 반드시 분리한다
 
@@ -36,7 +36,7 @@ data class UserResponse(val id: Long, val nickname: String)
 - **지연 로딩 폭발.** 엔티티에 `@OneToMany` 가 있으면 Jackson이 직렬화하다 컬렉션을 건드려 N+1을 부르거나 `LazyInitializationException`을 냅니다.
 - **API 계약이 DB 스키마에 묶입니다.** 컬럼명 하나 바꿨는데 모바일 앱이 깨져요.
 
-그리고 Lesson 16에서 말한 규칙이 여기서 완성됩니다. **엔티티는 일반 `class`, DTO는 `data class`.** DTO는 불변에 `copy()`, `equals()`가 공짜로 오니 테스트에서 `assertEquals(expected, actual)` 한 줄로 끝납니다.
+그리고 L42 에서 말한 규칙이 여기서 완성됩니다. **엔티티는 일반 `class`, DTO는 `data class`.** DTO는 불변에 `copy()`, `equals()`가 공짜로 오니 테스트에서 `assertEquals(expected, actual)` 한 줄로 끝납니다.
 
 ## @field: — 이거 모르면 검증이 조용히 무시된다
 
@@ -84,6 +84,8 @@ data class SignUpRequest(
 > 실패가 **조용합니다.** 예외도 경고 로그도 없습니다. 서비스는 정상으로 보이고, 한 달 뒤 빈 닉네임과 음수 나이가 섞인 데이터를 CS팀이 발견합니다. 이미 들어간 더러운 데이터는 마이그레이션으로 치워야 하죠.
 > 방어책은 두 가지입니다. ① `@field:` 를 팀 컨벤션으로 못 박고 리뷰에서 본다. ② **검증 실패 케이스를 테스트로 짠다** — `@field:` 를 빠뜨리면 그 테스트가 빨간불이 됩니다. ②가 진짜 방어선입니다.
 
+> **각주 — Kotlin 2.4 에서 기본 타깃이 바뀝니다.** `-language-version 2.0`~`2.3` 에서는 생성자 프로퍼티의 애노테이션이 **생성자 파라미터에만** 붙지만, 2.4 기본값부터는 `param` + `property` 가 적용돼 **백킹 필드에도** 붙습니다. 즉 2.4 로 컴파일하면 `@field:` 없이도 검증이 걸려요. 그렇다고 빼도 되는 건 아닙니다 — **Boot 3.3 이 관리하는 Kotlin 버전은 `1.9.25`** 이고(이 레슨들이 pin 한 2.0.21 도 param 전용), 한 조직 안에서도 모듈마다 컴파일러 버전이 섞입니다. **코드의 검증 여부가 컴파일러 버전에 따라 달라지게 두지 마세요. `@field:` 를 명시합니다.**
+
 실무에서 기억할 건 이 정도입니다.
 
 | 상황 | 타깃 |
@@ -123,7 +125,7 @@ class GlobalExceptionHandler {
 
 ## sealed class 로 에러 응답 모델링
 
-Lesson 5의 `sealed`가 웹 계층에서 진가를 발휘합니다. 에러 응답 모양이 종류마다 다르거든요 — 검증 실패는 필드 목록이 필요하고, 404는 메시지 하나면 됩니다.
+L14 의 `sealed` 가 웹 계층에서 진가를 발휘합니다. 에러 응답 모양이 종류마다 다르거든요 — 검증 실패는 필드 목록이 필요하고, 404는 메시지 하나면 됩니다.
 
 ```kotlin
 sealed interface ErrorResponse {
@@ -135,7 +137,7 @@ sealed interface ErrorResponse {
 data class FieldError(val field: String, val message: String)
 ```
 
-`Map<String, Any>`로 아무거나 담는 것과 비교하면 차이가 분명합니다. **타입마다 필요한 필드가 강제**되고, 에러 종류를 추가하면 처리하지 않은 `when` 이 전부 컴파일 에러가 납니다(Lesson 5).
+`Map<String, Any>`로 아무거나 담는 것과 비교하면 차이가 분명합니다. **타입마다 필요한 필드가 강제**되고, 에러 종류를 추가하면 처리하지 않은 `when` 이 전부 컴파일 에러가 납니다(L14).
 
 서비스 계층에서도 같은 패턴이 유용합니다. "이미 가입된 이메일" 같은 **예상되는 실패는 예외가 아니라 반환값**으로 표현하세요. 그러면 컨트롤러가 `when` 으로 분기하면서 컴파일러의 완전성 검사를 받습니다.
 
@@ -151,6 +153,21 @@ fun signUp(@RequestBody @Valid request: SignUpRequest): ResponseEntity<*> =
 
 예외는 **예외적인 것**에만 쓰세요.
 
+## 리뷰할 때 보는 것
+
+웹 계층의 결함은 **컴파일도 되고 서버도 뜨는** 종류라, 리뷰가 사실상 마지막 그물입니다.
+
+| 코드에서 보이면 | 이렇게 지적한다 |
+|---|---|
+| DTO 프로퍼티에 `@NotBlank` 가 타깃 없이 붙어 있다 | `@field:NotBlank` 로 바꿔라. 타깃을 안 적으면 생성자 파라미터에 붙어 Hibernate Validator 가 보지 못하고, 검증이 예외 없이 통째로 무시된다 |
+| 핸들러 파라미터에 `@Valid` 가 없다 | 붙여라. DTO 애노테이션이 완벽해도 `@Valid` 가 없으면 검증기가 아예 돌지 않는다. 증상이 `@field:` 누락과 똑같으니 둘 다 확인하라 |
+| 컨트롤러 시그니처에 엔티티가 있다 | 요청·응답 DTO 로 분리하라. 요청은 mass assignment, 응답은 과다 노출과 LAZY 직렬화 사고가 난다 |
+| 요청 DTO 와 응답 DTO 가 같은 클래스다 | 분리하라. 한쪽 요구가 바뀔 때마다 다른 쪽 계약이 같이 흔들린다 |
+| `@ExceptionHandler(Exception::class)` 안에 `log.error(e.message, e)` 가 없다 | 원본 예외를 남겨라. 포괄 핸들러가 500 으로 뭉개면서 스택트레이스를 삼키면 장애 때 원인을 찾을 수 없다 |
+| 프로젝트에 `@RestControllerAdvice` 가 없다 | 먼저 만들어라. 검증 실패가 Spring 기본 에러 바디로 나가면 클라이언트가 파싱하기 나쁘고 내부 정보가 샌다 |
+| 에러 응답이 `Map<String, Any>` 다 | `sealed interface` + `data class` 로 모델링하라. 종류마다 필요한 필드가 타입으로 강제되고 `when` 이 완전성 검사를 받는다 |
+| sealed 타입을 분기하는 `when` 에 `else` | 지우고 하위 타입을 전부 나열하라. `else` 가 있으면 케이스를 추가해도 컴파일러가 이 자리를 짚어주지 않는다 |
+
 ## 연습
 
 Spring 없이 **웹 계층의 뼈대를 그대로** 만들어 봅니다. 요청 DTO → 검증 → sealed 응답 → 렌더링.
@@ -160,7 +177,7 @@ Spring 없이 **웹 계층의 뼈대를 그대로** 만들어 봅니다. 요청 
    - `nickname` 이 공백이면 → `"닉네임은 필수입니다"`, 그게 아닌데 길이가 2~10 밖이면 → `"닉네임은 2~10자여야 합니다"`
    - `age` 가 14~120 밖이면 → `"만 14세 이상만 가입할 수 있습니다"`
 2. `signUp(request)` — 에러가 없으면 `Success(1001L, nickname)`, 있으면 `ValidationError(errors)`.
-3. `render(response)` — `when` 으로 분기하세요. **`else` 절 금지** (Lesson 5).
+3. `render(response)` — `when` 으로 분기하세요. **`else` 절 금지** (L14).
    - 성공: `"200 OK id=1001 nickname=김개발"`
    - 실패: `"400 BAD_REQUEST "` 뒤에 `"필드: 메시지"` 를 `", "` 로 이어 붙입니다 (`joinToString`).
 

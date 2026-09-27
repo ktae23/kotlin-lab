@@ -224,6 +224,8 @@ fun abs2(n: Int): Int = if (n < 0) -n else n
 fun fee(age: Int): Int = if (age < 8) 0 else if (age < 20) 5000 else 9000
 
 // void 가 아니라 Unit — 값이 하나뿐인 타입이라 val 로 받아 출력할 수 있다.
+// 실무에서는 Unit 을 생략하고(공식 컨벤션) 문자열도 템플릿 "[$APP] $message" 로 쓴다(Lesson 3).
+// 여기서 둘 다 일부러 안 한 건 "Unit 이 값이다" 를 눈으로 보이기 위해서다.
 fun log(message: String): Unit = println("[" + APP + "] " + message)
 
 fun main() {

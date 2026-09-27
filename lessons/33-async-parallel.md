@@ -4,7 +4,7 @@
 
 ## launch 와 async
 
-Lesson 10의 `launch`는 결과값이 없었습니다(`Job` 반환). 결과가 필요하면 `async`입니다.
+Lesson 31의 `launch`는 결과값이 없었습니다(`Job` 반환). 결과가 필요하면 `async`입니다.
 
 ```kotlin
 val deferred: Deferred<User> = async { fetchUser(id) }
@@ -28,11 +28,11 @@ val user: User = deferred.await()
 
 ```kotlin
 // 순차 — 900ms. async 를 썼는데도 병렬이 아니다!
-suspend fun bad(): String {
+suspend fun bad(): String = coroutineScope {
     val a = async { fetchProfile() }.await()   // 여기서 이미 기다림
     val b = async { fetchOrders() }.await()
     val c = async { fetchPoints() }.await()
-    return "$a $b $c"
+    "$a $b $c"
 }
 
 // 병렬 — 300ms
@@ -44,9 +44,11 @@ suspend fun good(): String = coroutineScope {
 }
 ```
 
+두 함수의 차이가 `coroutineScope` 유무가 아니라 **`await()` 의 위치 하나**뿐인 걸 보세요. 둘 다 `coroutineScope` 가 필요합니다 — `async` 는 `CoroutineScope` 의 확장 함수라서, 리시버 없는 맨 `suspend fun` 안에서는 아예 컴파일되지 않아요(`'async' can not be called without the corresponding coroutine scope`). 스코프는 최소 조건이고, 병렬이 되느냐는 **그 다음 문제**입니다.
+
 규칙은 **"전부 시작한 뒤에 전부 기다린다."** `async` 호출과 `await` 호출 사이에 다른 `async`가 들어갈 자리를 만드는 겁니다. `await()`을 `async` 바로 옆에 붙이는 순간 동기 호출과 똑같아집니다.
 
-> 코드 리뷰에서 `async { ... }.await()` 한 줄이 보이면 거의 항상 버그입니다. 그건 그냥 `withContext`로 쓰면 될 코드예요.
+> 코드 리뷰에서 `async { ... }.await()` 한 줄이 보이면 거의 항상 버그입니다. 뭐로 바꾸라고 할지는 **컨텍스트 인자가 있느냐**로 갈립니다 — `async { f() }.await()` 면 대체는 **`f()` 직접 호출**입니다(`withContext` 는 컨텍스트 인자가 필수라 여기선 쓸 수 없어요). `async(Dispatchers.IO) { f() }.await()` 처럼 디스패처를 지정한 경우에만 `withContext(Dispatchers.IO) { f() }` 가 답입니다.
 
 개수가 유동적이면 `awaitAll`을 씁니다.
 
@@ -114,6 +116,18 @@ suspend fun loadWidgets(): List<String> = supervisorScope {
 - 외부 API 병렬 호출은 **각각 `withTimeout`으로 감싸세요.** 하나가 무한정 늘어지면 전체가 그만큼 늘어집니다.
 - `async` 남발은 금물입니다. **호출 간 의존성이 없을 때만** 병렬입니다. `A`의 결과가 `B`의 입력이면 그냥 순차로 쓰세요.
 - 병렬 호출 수만큼 **하류 시스템의 부하가 곱해집니다.** 리스트 1000건에 `map { async { } }`를 걸면 DB에 동시 커넥션 1000개를 요구하는 셈입니다. 이럴 땐 `chunked()`로 나누거나 `Semaphore`로 동시 실행 수를 제한하세요.
+
+## 리뷰할 때 보는 것
+
+| 코드에서 보이면 | 이렇게 지적한다 |
+|---|---|
+| `async { }.await()` 를 붙여 씀 | 다음 `async` 가 시작도 못 한다. 전부 띄운 뒤에 `await` 하라 |
+| 컨텍스트 인자 없는 `async { f() }.await()` | 병렬이 아니다. `f()` 를 그냥 부르면 된다 |
+| `map { async { } }` 에 건수 제한 없음 | 리스트 크기만큼 하류 부하가 곱해진다. `chunked()` 나 `Semaphore` 로 동시 실행 수를 묶어라 |
+| 외부 호출 `async` 에 타임아웃 없음 | 하나가 늘어지면 전체가 그만큼 늘어진다. 각각 `withTimeout` 으로 감싸라 |
+| 결과가 서로의 입력인데 `async` | 의존성이 있으면 병렬이 아니다. 순차로 쓰는 게 맞다 |
+| 실패 하나로 전부 취소되면 곤란한데 `coroutineScope` | `runCatching` 으로 감싸도 스코프가 끝에서 다시 던진다. `supervisorScope` 를 써라 |
+| `awaitAll()` 결과 순서를 완료 순으로 기대 | 완료 순이 아니라 **인자 선언 순서**다 |
 
 ## 연습
 

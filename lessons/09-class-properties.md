@@ -234,10 +234,12 @@ class Account(/* TODO: 주 생성자 — owner 는 프로퍼티, initial 은 프
     // TODO: 부 생성자 — 이름만 받아 잔액 0 으로 위임
 
     fun deposit(amount: Long) {
+        require(amount > 0) { "입금액은 0보다 커야 한다" }
         balance += amount
     }
 
     fun withdraw(amount: Long): Boolean {
+        require(amount > 0) { "출금액은 0보다 커야 한다" }
         if (amount > balance) return false
         balance -= amount
         return true
@@ -324,11 +326,15 @@ class Account(val owner: String, initial: Long) {
 
     constructor(owner: String) : this(owner, 0L)
 
+    // init 의 require 만으로는 불변식이 안 지켜진다. 음수 금액이 들어오면
+    // balance 가 음수가 되어 "초기 잔액은 음수일 수 없다" 를 우회한다.
     fun deposit(amount: Long) {
+        require(amount > 0) { "입금액은 0보다 커야 한다" }
         balance += amount
     }
 
     fun withdraw(amount: Long): Boolean {
+        require(amount > 0) { "출금액은 0보다 커야 한다" }
         if (amount > balance) return false
         balance -= amount
         return true

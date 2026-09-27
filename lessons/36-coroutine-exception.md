@@ -136,6 +136,22 @@ catch (e: Exception) { log.error("실패", e) }
 | 성공/실패/취소 공통 정리 | `try/finally`, `onCompletion` |
 | 취소 | **잡지 말 것** (잡았으면 rethrow) |
 
+## 리뷰할 때 보는 것
+
+예외 처리는 **"이 핸들러가 실제로 불리는 자리인가"** 를 확인하는 일입니다. 문법이 맞아도 안 불리는 조합이 많습니다.
+
+| 코드에서 보이면 | 이렇게 지적한다 |
+|---|---|
+| `async` 에 `CoroutineExceptionHandler` 를 붙임 | 핸들러는 `launch` 에만 유효합니다. `async` 의 예외는 `Deferred` 가 들고 있으니 `await()` 를 `try/catch` 하세요. 지금은 로그도 안 남습니다 |
+| 루트가 아닌 자식 `launch` 에 핸들러를 붙임 | 자식에 붙인 핸들러는 무시되고 예외는 부모로 올라갑니다. 스코프를 만드는 지점(`CoroutineScope(SupervisorJob() + handler)`)으로 옮기세요 |
+| `try { scope.launch { ... } } catch` | `launch` 는 즉시 반환하므로 안의 예외는 `try` 가 끝난 뒤에 터집니다. `try` 를 코루틴 안으로 넣으세요 |
+| `coroutineScope` 안 `async` 의 `await()` 만 감싼 `try/catch` | 잡히기 전에 예외가 부모로 전파돼 형제까지 취소됩니다. 실패를 호출 지점에서 끝내려면 `supervisorScope` 로 바꾸세요 |
+| `CoroutineScope(SupervisorJob())` 의 `launch` 안에서 또 `launch` | SupervisorJob 은 직계 자식에게만 적용됩니다. 안쪽은 일반 Job 이라 형제가 같이 죽습니다. 격리가 필요한 그 지점에서 `supervisorScope` 를 여세요 |
+| 서로 독립인 작업 N개를 `coroutineScope` 로 팬아웃 | 하나 실패하면 나머지가 취소됩니다. 알림 발송처럼 각자 성패가 따로라면 `supervisorScope`, 전부 성공해야 의미 있다면 지금이 맞습니다 |
+| `flow { }` 안에서 `emit` 을 `try/catch` 로 감쌈 | 소비자가 낸 예외를 생산자가 먹습니다. 예외 투명성 위반이라 런타임에 `Flow exception transparency is violated` 가 납니다. 폴백은 밖에서 `catch` 연산자로 |
+| `collect` 블록의 예외를 `catch` 연산자로 잡으려 함 | `catch` 는 업스트림만 잡습니다. 소비를 `onEach` 로 올리고 그 아래에 `catch` 를 달아 `collect()` 로 끝내세요 |
+| 코루틴 안의 `runCatching { }` | `Throwable` 전부를 잡아 `CancellationException` 까지 `failure` 로 포장합니다. 블록 안에서 `currentCoroutineContext().ensureActive()` 로 취소를 다시 던지거나 잡을 타입을 좁히세요 |
+
 ## 연습
 
 세 단계를 완성하세요. 예외는 전부 **직접 던진 고정 메시지**를 씁니다.

@@ -116,7 +116,18 @@ internal fun Order.toDto(): OrderDto = ...
 
 이게 **Kotlin에서 공개 API를 관리하는 주된 도구**입니다. 멀티모듈 프로젝트라면 `:domain` 모듈의 헬퍼가 `:api` 모듈로 새어 나가는 걸 컴파일러가 막아 줍니다.
 
-> 주의: `internal` 은 JVM 바이트코드에서는 이름이 뒤틀린 `public`입니다(`toDto$module_name`). **Java 코드에서는 보입니다.** Kotlin 컴파일러만 막아 줘요. 그래서 Kotlin/Java 혼재 모듈에서는 완전한 방어가 아닙니다.
+> 주의: `internal` 은 JVM 바이트코드에서 그냥 `public`입니다. **Java 코드에서는 보입니다** — Kotlin 컴파일러만 막아 줘요.
+>
+> 이름이 뒤틀리는(name mangling) 건 **클래스 멤버일 때만**입니다. 최상위 선언은 이름이 그대로 남습니다.
+>
+> ```kotlin
+> class OrderMapper {
+>     internal fun secret() = "..."       // 바이트코드: secret$mymodule()
+> }
+> internal fun topLevel() = "..."         // 바이트코드: topLevel()  — 이름 그대로
+> ```
+>
+> `javap -p` 로 찍어 보면 정확히 이렇게 나옵니다. 그래서 최상위 `internal` 함수는 Java 에서 `FileNameKt.topLevel()` 로 **아무 방해 없이** 부를 수 있고, 클래스 멤버도 뒤틀린 이름을 알면 부를 수 있습니다. Kotlin/Java 혼재 모듈에서 `internal` 은 완전한 방어가 아닙니다.
 
 ### 최상위 `private` = 파일 스코프
 
@@ -157,6 +168,12 @@ class Token private constructor(val value: String)
 - `VipRatePolicy` — `RatePolicy` 를 상속. `label` 은 `super` 뒤에 `" (고정)"` 을 붙이고 **더는 못 덮게 잠근다**
 - `FlatPolicy` — 정액 할인. `label` 은 덮지 않는다
 - `won` 은 모듈 안에서만 쓰는 함수, `banner` 는 이 파일 안에서만 쓰는 함수
+
+> **이 연습은 위 리뷰 표를 일부러 어깁니다.** `Policy → RatePolicy → VipRatePolicy` 는 3단 상속 체인이고,
+> 표에서는 "2단계 이상 상속 체인"과 "상속으로 기능 재사용"을 지적하라고 했죠.
+> `final override` 가 **언제 필요해지는지** 보이려면 3단이 있어야 해서 그대로 뒀습니다.
+> 실무라면 `RatePolicy(name, percent, suffix: String = "")` 처럼 **접미사 파라미터 하나로 합성**하고
+> `VipRatePolicy` 라는 클래스는 만들지 않습니다. 문법을 보는 연습과 설계 판단은 별개입니다.
 
 ```kotlin starter
 const val CURRENCY = "원"

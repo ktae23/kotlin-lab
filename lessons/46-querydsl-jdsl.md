@@ -1,6 +1,6 @@
 # Lesson 46 — 타입 세이프 쿼리
 
-Lesson 19에서 엔티티를 제대로 잡았으니 이제 조회입니다. Spring Data JPA의 메서드 이름 쿼리(`findByNameAndStatus`)는 조건 두세 개까지는 편하지만, 실무의 검색 화면은 그렇게 안 생겼죠. **조건 6개 중 사용자가 채운 것만 적용**해야 합니다. 여기서부터가 진짜입니다.
+L45 에서 엔티티를 제대로 잡았으니 이제 조회입니다. Spring Data JPA의 메서드 이름 쿼리(`findByNameAndStatus`)는 조건 두세 개까지는 편하지만, 실무의 검색 화면은 그렇게 안 생겼죠. **조건 6개 중 사용자가 채운 것만 적용**해야 합니다. 여기서부터가 진짜입니다.
 
 ## JPQL 문자열의 문제 — 런타임까지 모른다
 
@@ -60,17 +60,20 @@ QueryDSL은 `@Entity`를 읽어 `QMember` 같은 Q클래스를 **생성**합니�
 
 ```kotlin
 // build.gradle.kts — kapt 방식 (전통적)
-plugins { kotlin("kapt") version "1.9.25" }
+plugins { kotlin("kapt") version "2.0.21" }
 dependencies {
     implementation("com.querydsl:querydsl-jpa:5.1.0:jakarta")
     kapt("com.querydsl:querydsl-apt:5.1.0:jakarta")
+    // 이 둘이 빠지면 Q클래스가 "조용히" 안 생긴다 — 가장 흔한 첫 삽질
+    kapt("jakarta.persistence:jakarta.persistence-api")
+    kapt("jakarta.annotation:jakarta.annotation-api")
 }
 ```
 
 아픈 지점 셋:
 
 1. **kapt는 느립니다.** Kotlin 코드를 Java 스텁으로 바꾼 뒤 annotation processor를 돌려요. 엔티티 몇십 개만 돼도 빌드 시간이 눈에 띄게 늡니다. KSP로 갈아타고 싶어도 **QueryDSL 공식은 KSP를 지원하지 않습니다**(커뮤니티 포크는 있음).
-2. **Q클래스가 Java로 생성되므로 전부 플랫폼 타입**입니다. Lesson 1의 `String!` 문제가 되살아나요. `member.name`이 `StringPath!`라 Kotlin의 null 안정성이 안 먹습니다.
+2. **Q클래스가 Java로 생성되므로 전부 플랫폼 타입**입니다. L08 의 `String!` 문제가 되살아나요. `member.name`이 `StringPath!`라 Kotlin의 null 안정성이 안 먹습니다.
 3. **`null` 조건 조합이 어색합니다.** `BooleanExpression?`을 다뤄야 하는데 `and`/`or`가 플랫폼 타입이라 체인이 지저분해져요. 그래서 이런 확장 함수를 직접 만들어 쓰는 팀이 흔합니다.
 
 ```kotlin
@@ -116,7 +119,7 @@ val query = jpql {
 
 ## 프로젝션 — data class로 받기
 
-목록 API에서 엔티티를 통째로 가져오는 건 낭비입니다. 필요한 컬럼만 DTO로 받으세요. Lesson 19에서 말한 **"엔티티는 안, DTO는 밖"** 경계가 여기서 실현됩니다.
+목록 API에서 엔티티를 통째로 가져오는 건 낭비입니다. 필요한 컬럼만 DTO로 받으세요. L45 에서 말한 **"엔티티는 안, DTO는 밖"** 경계가 여기서 실현됩니다.
 
 ```java
 // Java + QueryDSL — @QueryProjection
@@ -137,7 +140,7 @@ data class MemberSummary @QueryProjection constructor(
 
 Kotlin에서 생성자에 애노테이션을 붙이려면 `constructor` 키워드를 **명시**해야 합니다. 빼먹으면 "왜 Q클래스가 안 생기지?" 하면서 한참 헤매요. `@QueryProjection`은 DTO가 QueryDSL에 의존하게 만드니, 싫으면 `Projections.constructor(...)`를 씁니다(타입 안정성은 일부 포기). Kotlin JDSL은 `selectNew<MemberSummary>(path(Member::id), ...)` 로 그냥 됩니다.
 
-> **실무 경고.** 프로젝션을 `data class`로 받는 건 좋은데, **엔티티를 그대로 컨트롤러까지 내보내지 마세요.** LAZY 연관이 직렬화 시점에 초기화되면서 N+1이 터지거나(Lesson 21), OSIV가 꺼져 있으면 `LazyInitializationException`이 500 에러로 나갑니다. 게다가 엔티티에 컬럼 하나 추가하면 **API 응답 스펙이 소리 없이 바뀝니다.** 클라이언트가 깨지고 나서야 압니다.
+> **실무 경고.** 프로젝션을 `data class`로 받는 건 좋은데, **엔티티를 그대로 컨트롤러까지 내보내지 마세요.** LAZY 연관이 직렬화 시점에 초기화되면서 N+1이 터지거나(L47), OSIV가 꺼져 있으면 `LazyInitializationException`이 500 에러로 나갑니다. 게다가 엔티티에 컬럼 하나 추가하면 **API 응답 스펙이 소리 없이 바뀝니다.** 클라이언트가 깨지고 나서야 압니다.
 
 ## 무엇을 쓰든 원칙은 하나
 
@@ -146,22 +149,42 @@ Kotlin에서 생성자에 애노테이션을 붙이려면 `constructor` 키워�
 - 조건 하나 = **null을 반환할 수 있는 함수 하나**
 - 조립기는 **null을 받으면 건너뛴다**
 - `if` 로 `AND` 를 붙이지 않는다, `where 1=1` 을 쓰지 않는다
+- 조건이 내놓는 것은 **완성된 SQL 문자열이 아니라 "SQL 조각 + 바인딩할 값" 한 쌍**이다
+
+마지막 줄이 이 레슨 전체의 이유입니다. QueryDSL 의 `member.name.contains(name)` 도, JDSL 의 `path(Member::name).like("%$it%")` 도 사용자 입력을 쿼리 문자열에 붙이지 않아요. **값은 끝까지 값으로 남고 바인딩 파라미터로 들어갑니다.** 문자열로 조립하는 순간 잃는 게 타입 안정성만이 아니라 **SQL 인젝션 방어**이기도 합니다.
 
 이 구조를 손에 익히면 QueryDSL이든 JDSL이든 Exposed든 갈아타는 게 문법 문제일 뿐입니다. 연습에서 이 조립기를 **직접** 만들어 보겠습니다.
 
+## 리뷰할 때 보는 것
+
+동적 쿼리 PR 에서는 **문자열이 어디까지 흘러가는지**를 따라가세요. 타입 안정성과 인젝션 방어가 같은 줄에서 갈립니다.
+
+| 코드에서 보이면 | 이렇게 지적한다 |
+|---|---|
+| 쿼리 문자열에 `where 1=1` | 조건 목록을 모아 `joinToString(" AND ", prefix = " WHERE ")` 로 만들어라. 조건이 없으면 WHERE 절 자체가 안 나와야 한다 |
+| 사용자 입력을 쿼리 문자열에 보간한다 (`"$column = '$value'"`) | 값을 SQL 에 붙이지 마라. SQL 조각에는 `?` 를 두고 값은 바인딩 파라미터로 따로 넘겨라. 인젝션 방어와 실행 계획 캐시가 여기서 갈린다 |
+| `BooleanBuilder` + `if` 더미 | 조건 하나당 "값이 없으면 null 을 반환하는 함수" 로 쪼개라. `where(...)` 가 null 을 건너뛰므로 `if` 가 사라지고 조건을 다른 쿼리에서 재사용할 수 있다 |
+| `@Query` 안의 JPQL 에 엔티티 필드명이 문자열로 박혀 있다 | 필드명을 리팩터링해도 쿼리는 따라오지 않는다. QueryDSL 의 Q클래스나 JDSL 의 `Member::name` 프로퍼티 참조로 바꿔라 |
+| Q클래스가 안 생긴다는 이유로 kapt 설정을 복사해 왔다 | `kapt("jakarta.persistence:jakarta.persistence-api")` 와 `jakarta.annotation-api` 가 있는지 확인하라. 빠지면 에러 없이 Q클래스만 안 나온다 |
+| `@QueryProjection` 이 붙은 DTO 에 `constructor` 키워드가 없다 | Kotlin 은 주 생성자에 애노테이션을 붙일 때 `constructor` 를 명시해야 한다. 빼면 Q클래스가 생성되지 않는다 |
+| 조회 결과로 엔티티를 컨트롤러까지 내보낸다 | 필요한 컬럼만 `data class` 프로젝션으로 받아라. 엔티티가 경계를 넘으면 LAZY 직렬화 사고와 무언의 API 스펙 변경이 따라온다 |
+| 컬렉션 fetch join 에 `Pageable` 이 함께 있다 | `HHH000104` — Hibernate 가 전체를 메모리에 올린 뒤 잘라낸다. `@BatchSize` 나 `default_batch_fetch_size` 로 바꿔라 |
+
 ## 연습
 
-QueryDSL의 `where(...)` 가변인자가 하는 일 — **null 조건은 건너뛰기** — 를 순수 Kotlin으로 구현합니다. (외부 라이브러리 없이, 최종 SQL 문자열을 만들어 확인합니다.)
+QueryDSL 의 `where(...)` 가변인자가 하는 일 — **null 조건은 건너뛰기** — 를 순수 Kotlin으로 구현합니다. (외부 라이브러리 없이, 최종 SQL 과 바인딩 파라미터를 만들어 확인합니다.)
+
+조건 하나가 내놓는 것은 **`Pair<SQL 조각, 바인딩할 값>`** 입니다. 값이 SQL 문자열 안으로 들어가지 않는다는 게 이 연습의 전부예요 — 실무 조건 팩토리가 정확히 이 계약을 지킵니다.
 
 구현할 것:
 
-1. `QueryBuilder.where(condition: String?)` — `condition`이 `null`이면 **무시**하고, 아니면 조건 목록에 추가. 자기 자신(`this`)을 반환해 체이닝 가능하게.
-2. `QueryBuilder.build()` — `SELECT * FROM {table}` 로 시작. 조건이 **하나라도 있으면** ` WHERE cond1 AND cond2 ...`, **하나도 없으면 WHERE 절 자체를 생략**. `orderBy`가 설정돼 있으면 ` ORDER BY {clause}`를 붙임.
+1. `QueryBuilder.where(condition: Pair<String, Any?>?)` — `condition`이 `null`이면 **무시**하고, 아니면 SQL 조각은 조건 목록에, 값은 파라미터 목록에 담습니다. 값이 `Collection` 이면 **원소를 하나씩 펼쳐서** 담으세요 (`IN` 은 `?` 가 여러 개니까요). 자기 자신(`this`)을 반환해 체이닝 가능하게.
+2. `QueryBuilder.build()` — `SELECT * FROM {table}` 로 시작. 조건이 **하나라도 있으면** ` WHERE cond1 AND cond2 ...`, **하나도 없으면 WHERE 절 자체를 생략**. `orderBy`가 설정돼 있으면 ` ORDER BY {clause}`를 붙이고, **SQL 과 파라미터 목록을 `Pair` 로** 돌려줍니다.
 3. 조건 팩토리 4개 — 값이 없으면 `null` 반환:
-   - `likeOrNull("name", "박")` → `name LIKE '%박%'` (`null`이거나 **공백뿐이면** `null`)
-   - `eqOrNull("status", "ACTIVE")` → `status = 'ACTIVE'` (`null`이거나 공백뿐이면 `null`)
-   - `inOrNull("role", listOf("USER","ADMIN"))` → `role IN ('USER', 'ADMIN')` (`null`이거나 **빈 리스트면** `null`)
-   - `goeOrNull("age", 20)` → `age >= 20` (`null`이면 `null`)
+   - `likeOrNull("name", "박")` → `"name LIKE ?" to "%박%"` (`null`이거나 **공백뿐이면** `null`)
+   - `eqOrNull("status", "ACTIVE")` → `"status = ?" to "ACTIVE"` (`null`이거나 공백뿐이면 `null`)
+   - `inOrNull("role", listOf("USER","ADMIN"))` → `"role IN (?, ?)" to listOf("USER","ADMIN")` (`null`이거나 **빈 리스트면** `null`)
+   - `goeOrNull("age", 20)` → `"age >= ?" to 20` (`null`이면 `null`)
 
 ```kotlin starter
 data class MemberSearch(
@@ -173,10 +196,12 @@ data class MemberSearch(
 
 class QueryBuilder(private val table: String) {
     private val conditions = mutableListOf<String>()
+    private val params = mutableListOf<Any?>()
     private var orderBy: String? = null
 
-    // TODO: condition 이 null 이면 건너뛰고, 아니면 conditions 에 추가한 뒤 this 반환
-    fun where(condition: String?): QueryBuilder {
+    // TODO: condition 이 null 이면 건너뛰고, 아니면 SQL 조각은 conditions 에,
+    //       값은 params 에 담은 뒤 this 반환. 값이 Collection 이면 원소별로 펼쳐 담는다.
+    fun where(condition: Pair<String, Any?>?): QueryBuilder {
         TODO("구현하세요")
     }
 
@@ -185,29 +210,33 @@ class QueryBuilder(private val table: String) {
         return this
     }
 
-    // TODO: SELECT * FROM {table} [ WHERE a AND b ...] [ ORDER BY {clause}]
-    fun build(): String {
+    // TODO: "SELECT * FROM {table} [ WHERE a AND b ...] [ ORDER BY {clause}]" 와
+    //       바인딩 파라미터 목록을 Pair 로 반환하세요.
+    fun build(): Pair<String, List<Any?>> {
         TODO("구현하세요")
     }
 }
 
-// TODO: 값이 없으면 null 을 반환하는 조건 팩토리 4개
-fun likeOrNull(column: String, value: String?): String? = TODO("구현하세요")
+// TODO: 값이 없으면 null 을 반환하는 조건 팩토리 4개.
+//       SQL 조각에는 ? 만 남기고, 값은 Pair 의 두 번째 자리로 보냅니다.
+fun likeOrNull(column: String, value: String?): Pair<String, Any?>? = TODO("구현하세요")
 
-fun eqOrNull(column: String, value: String?): String? = TODO("구현하세요")
+fun eqOrNull(column: String, value: String?): Pair<String, Any?>? = TODO("구현하세요")
 
-fun inOrNull(column: String, values: List<String>?): String? = TODO("구현하세요")
+fun inOrNull(column: String, values: List<String>?): Pair<String, Any?>? = TODO("구현하세요")
 
-fun goeOrNull(column: String, value: Int?): String? = TODO("구현하세요")
+fun goeOrNull(column: String, value: Int?): Pair<String, Any?>? = TODO("구현하세요")
 
-fun search(cond: MemberSearch): String =
-    QueryBuilder("member")
+fun search(cond: MemberSearch): String {
+    val (sql, params) = QueryBuilder("member")
         .where(likeOrNull("name", cond.name))
         .where(eqOrNull("status", cond.status))
         .where(inOrNull("role", cond.roles))
         .where(goeOrNull("age", cond.minAge))
         .orderBy("id DESC")
         .build()
+    return "$sql | params=$params"
+}
 
 fun main() {
     println(search(MemberSearch(name = "박")))
@@ -218,26 +247,26 @@ fun main() {
 ```
 
 ```text expected
-SELECT * FROM member WHERE name LIKE '%박%' ORDER BY id DESC
-SELECT * FROM member WHERE status = 'ACTIVE' AND role IN ('USER', 'ADMIN') AND age >= 20 ORDER BY id DESC
-SELECT * FROM member ORDER BY id DESC
-SELECT * FROM member ORDER BY id DESC
+SELECT * FROM member WHERE name LIKE ? ORDER BY id DESC | params=[%박%]
+SELECT * FROM member WHERE status = ? AND role IN (?, ?) AND age >= ? ORDER BY id DESC | params=[ACTIVE, USER, ADMIN, 20]
+SELECT * FROM member ORDER BY id DESC | params=[]
+SELECT * FROM member ORDER BY id DESC | params=[]
 ```
 
 ```text hint
-이 문제의 핵심은 **`if` 를 조립기 쪽에 두지 않는 것**입니다. "값이 있나?" 를 판단하는 책임은 조건 팩토리 4개가 각자 지고, 없으면 `null` 을 내놓습니다. 조립기(`where`)는 받은 게 null 인지만 보고 조용히 버려요. 그리고 `build()` — 조건이 하나도 없으면 `WHERE` 라는 글자가 **아예 안 나와야** 합니다. `where 1=1` 을 쓰지 않겠다는 게 바로 이 뜻입니다.
+이 문제의 핵심은 둘입니다. 하나 — **`if` 를 조립기 쪽에 두지 않는 것.** "값이 있나?" 를 판단하는 책임은 조건 팩토리 4개가 각자 지고, 없으면 `null` 을 내놓습니다. 조립기(`where`)는 받은 게 null 인지만 보고 조용히 버려요. 둘 — **값이 SQL 문자열에 들어가지 않는 것.** 팩토리가 돌려주는 `Pair` 의 왼쪽은 `?` 가 박힌 조각이고 오른쪽이 값입니다. 그리고 `build()` — 조건이 하나도 없으면 `WHERE` 라는 글자가 **아예 안 나와야** 합니다. `where 1=1` 을 쓰지 않겠다는 게 바로 이 뜻이에요.
 ---
-팩토리 4개는 `?.takeIf { }?.let { }` 한 줄이면 끝납니다. `takeIf` 는 조건이 거짓이면 null 을 내놓으니(Lesson 1), 문자열엔 `isNotBlank()`, 리스트엔 `isNotEmpty()` 를 조건으로 주세요. `goeOrNull` 은 값이 있기만 하면 되니 `?.let { }` 만으로 충분합니다. `build()` 는 `buildString { }` 안에서 `append` 하면 되고, 조각을 잇는 데엔 `joinToString` 의 `separator` · `prefix` · `postfix` 세 인자가 전부 쓰입니다.
+팩토리 4개는 `?.takeIf { }?.let { }` 한 줄이면 끝납니다. `takeIf` 는 조건이 거짓이면 null 을 내놓으니(L20), 문자열엔 `isNotBlank()`, 리스트엔 `isNotEmpty()` 를 조건으로 주세요. `goeOrNull` 은 값이 있기만 하면 되니 `?.let { }` 만으로 충분합니다. 쌍을 만드는 건 `to` 중위 함수고요. `build()` 는 `buildString { }` 안에서 `append` 하면 되고, 조각을 잇는 데엔 `joinToString` 의 `separator` · `prefix` 세 인자가 쓰입니다.
 ---
-`where(condition)` 는 `condition?.let { conditions += it }` 뒤에 `return this` — `?.let` 이 곧 "null 이면 건너뛴다" 입니다. `build()` 의 WHERE 절은 `if (conditions.isNotEmpty())` 로 한 번 감싸고, 그 안에서 `joinToString(" AND ", prefix = " WHERE ")` 를 쓰세요. `prefix` 를 쓰는 게 요령입니다 — 조건이 없으면 `if` 가 통째로 안 돌아 WHERE 가 사라지고, 있으면 접두사가 딱 한 번만 붙습니다. `inOrNull` 도 같은 함수로 해결돼요. `prefix = "$column IN ("`, `postfix = ")"`, 그리고 각 원소를 작은따옴표로 감싸는 변환 람다까지 **한 번의 호출**에 담깁니다.
+`where(condition)` 는 `condition?.let { (sql, value) -> ... }` 로 **구조 분해**해서 받으면 읽기 좋습니다. 안에서 `conditions += sql` 뒤에 값을 담는데, 여기서 갈래가 하나 생겨요 — `IN` 조건의 값은 리스트 하나가 아니라 **원소 여러 개**입니다. `if (value is Collection<*>) params.addAll(value) else params.add(value)` 로 펼치세요. `?` 의 개수와 파라미터 개수가 어긋나면 실제 JDBC 는 바로 터집니다. `inOrNull` 의 `?` 묶음은 `values.joinToString(", ") { "?" }` 로 만들고요. `build()` 의 WHERE 절은 `if (conditions.isNotEmpty())` 로 감싼 뒤 `joinToString(" AND ", prefix = " WHERE ")` — `prefix` 를 쓰는 게 요령입니다. 조건이 없으면 `if` 가 통째로 안 돌아 WHERE 가 사라지고, 있으면 접두사가 딱 한 번만 붙습니다.
 ---
 뼈대는 이렇습니다.
 
-`fun where(condition: String?): QueryBuilder { condition?.let { ___ }; return this }`
+`fun where(condition: Pair<String, Any?>?): QueryBuilder { condition?.let { (sql, value) -> conditions += sql; if (value is ___) params.addAll(value) else params.add(value) }; return this }`
 
-`build()` 안은 `append("SELECT * FROM ").append(table)` → `if (conditions.___()) append(conditions.joinToString(" AND ", prefix = ___))` → `orderBy?.let { append(" ORDER BY ").append(it) }`.
+`build()` 안은 `val sql = buildString { append("SELECT * FROM ").append(table); if (conditions.___()) append(conditions.joinToString(" AND ", prefix = ___)); orderBy?.let { append(" ORDER BY ").append(it) } }` 뒤에 `return sql ___ params.toList()`.
 
-팩토리는 `value?.takeIf { ___ }?.let { "$column LIKE '%$it%'" }` 꼴입니다.
+팩토리는 `value?.takeIf { ___ }?.let { "$column LIKE ?" to "%$it%" }` 꼴입니다.
 ```
 
 ```kotlin solution
@@ -250,11 +279,16 @@ data class MemberSearch(
 
 class QueryBuilder(private val table: String) {
     private val conditions = mutableListOf<String>()
+    private val params = mutableListOf<Any?>()
     private var orderBy: String? = null
 
     // QueryDSL 의 where(...) 가변인자와 같은 계약: null 조건은 조용히 건너뛴다.
-    fun where(condition: String?): QueryBuilder {
-        condition?.let { conditions += it }
+    fun where(condition: Pair<String, Any?>?): QueryBuilder {
+        condition?.let { (sql, value) ->
+            conditions += sql
+            // IN 조건은 ? 가 여러 개다. 값도 그만큼 펼쳐야 개수가 맞는다.
+            if (value is Collection<*>) params.addAll(value) else params.add(value)
+        }
         return this
     }
 
@@ -263,38 +297,44 @@ class QueryBuilder(private val table: String) {
         return this
     }
 
-    fun build(): String = buildString {
-        append("SELECT * FROM ").append(table)
-        // 조건이 하나도 없으면 WHERE 절 자체가 사라진다 — where 1=1 을 쓰지 않는 이유.
-        if (conditions.isNotEmpty()) {
-            append(conditions.joinToString(separator = " AND ", prefix = " WHERE "))
+    fun build(): Pair<String, List<Any?>> {
+        val sql = buildString {
+            append("SELECT * FROM ").append(table)
+            // 조건이 하나도 없으면 WHERE 절 자체가 사라진다 — where 1=1 을 쓰지 않는 이유.
+            if (conditions.isNotEmpty()) {
+                append(conditions.joinToString(separator = " AND ", prefix = " WHERE "))
+            }
+            orderBy?.let { append(" ORDER BY ").append(it) }
         }
-        orderBy?.let { append(" ORDER BY ").append(it) }
+        return sql to params.toList()
     }
 }
 
 // 조건 하나 = null 을 반환할 수 있는 함수 하나. 판정은 전부 takeIf 가 맡는다.
-fun likeOrNull(column: String, value: String?): String? =
-    value?.takeIf { it.isNotBlank() }?.let { "$column LIKE '%$it%'" }
+// SQL 조각에는 ? 만 남기고 값은 Pair 의 오른쪽으로 보낸다 — 값이 쿼리 문자열에 섞이지 않는다.
+fun likeOrNull(column: String, value: String?): Pair<String, Any?>? =
+    value?.takeIf { it.isNotBlank() }?.let { "$column LIKE ?" to "%$it%" }
 
-fun eqOrNull(column: String, value: String?): String? =
-    value?.takeIf { it.isNotBlank() }?.let { "$column = '$it'" }
+fun eqOrNull(column: String, value: String?): Pair<String, Any?>? =
+    value?.takeIf { it.isNotBlank() }?.let { "$column = ?" to it }
 
-fun inOrNull(column: String, values: List<String>?): String? =
+fun inOrNull(column: String, values: List<String>?): Pair<String, Any?>? =
     values?.takeIf { it.isNotEmpty() }
-        ?.joinToString(separator = ", ", prefix = "$column IN (", postfix = ")") { "'$it'" }
+        ?.let { list -> "$column IN (${list.joinToString(", ") { "?" }})" to list }
 
-fun goeOrNull(column: String, value: Int?): String? =
-    value?.let { "$column >= $it" }
+fun goeOrNull(column: String, value: Int?): Pair<String, Any?>? =
+    value?.let { "$column >= ?" to it }
 
-fun search(cond: MemberSearch): String =
-    QueryBuilder("member")
+fun search(cond: MemberSearch): String {
+    val (sql, params) = QueryBuilder("member")
         .where(likeOrNull("name", cond.name))
         .where(eqOrNull("status", cond.status))
         .where(inOrNull("role", cond.roles))
         .where(goeOrNull("age", cond.minAge))
         .orderBy("id DESC")
         .build()
+    return "$sql | params=$params"
+}
 
 fun main() {
     println(search(MemberSearch(name = "박")))

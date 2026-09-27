@@ -64,7 +64,7 @@ Object loadUser(long id, Continuation<User> cont) {
 
 > 면접 단골: "`suspend` 키워드가 하는 일이 뭔가요?" 정답은 "비동기로 만든다"가 아니라 **"CPS 변환으로 상태 기계를 생성하고 Continuation 파라미터를 추가한다"** 입니다.
 
-## 코루틴 빌더 3개
+## 코루틴 빌더와 스코프 함수
 
 ```kotlin
 fun main() = runBlocking {          // (1) 블로킹 세계 → 코루틴 세계 진입
@@ -75,7 +75,9 @@ fun main() = runBlocking {          // (1) 블로킹 세계 → 코루틴 세계
 
 - **`runBlocking`** — 현재 스레드를 **블로킹하고** 내부 코루틴이 끝날 때까지 기다립니다. `main`과 테스트 코드에서만 쓰세요. 서비스 코드에 `runBlocking`이 보이면 스레드를 블로킹하는 것이니 코루틴을 쓰는 의미가 사라집니다.
 - **`launch`** — 결과값이 없는 작업을 시작하고 `Job`을 반환합니다. Java의 `executor.submit(runnable)`에 대응합니다.
-- **`coroutineScope`** — `suspend` 함수이고, **자식이 전부 끝나야 반환**합니다. 블로킹하지 않고 중단만 합니다.
+- **`coroutineScope`** — 이건 빌더가 아니라 **스코프 함수**입니다(`supervisorScope` 도 같은 부류). 새 코루틴을 띄우는 게 아니라 **자식을 담을 스코프를 만들어 주는** 역할이고, `suspend` 함수여서 **자식이 전부 끝나야 반환**합니다. 블로킹하지 않고 중단만 합니다.
+
+분류를 정확히 말해 두면 좋습니다 — **빌더는 `launch` / `async` / `runBlocking`** 이고, `coroutineScope` / `supervisorScope` 는 스코프 함수입니다. 면접에서 "빌더 뭐가 있죠?" 에 `coroutineScope` 를 섞어 답하면 바로 되물어 옵니다.
 
 `runBlocking`과 `coroutineScope`는 "자식을 기다린다"는 점은 같고 **기다리는 방식**이 다릅니다. 전자는 스레드를 붙잡고, 후자는 놓아줍니다.
 
@@ -124,6 +126,21 @@ suspend fun risky(): String = try {
 `ExecutorService`로 이 동작을 직접 구현하려면 `Future` 목록 관리 + 예외 감시 + 전파 취소를 전부 손으로 짜야 합니다. Java 21의 `StructuredTaskScope`가 바로 이 개념을 뒤늦게 가져온 것이고요.
 
 > 실무 경고: `GlobalScope.launch`는 **부모가 없는 코루틴**입니다. 구조적 동시성을 스스로 꺼버리는 스위치예요. 리뷰에서 보이면 `!!`와 같은 취급을 하세요. Spring에서는 보통 요청 스코프나 컴포넌트가 소유한 `CoroutineScope`를 씁니다.
+
+## 리뷰할 때 보는 것
+
+이 레슨의 주제는 **"이 코루틴의 주인이 누구냐"** 입니다. 아래 왼쪽이 보이면 그 질문이 답되지 않은 코드입니다.
+
+| 코드에서 보이면 | 이렇게 지적한다 |
+|---|---|
+| `GlobalScope.launch` | 부모가 없는 코루틴이라 수명이 앱과 같아집니다. 누가 이걸 취소하죠? 작업을 소유할 스코프(요청 스코프나 컴포넌트가 가진 `CoroutineScope`)를 파라미터로 받으세요 |
+| 서비스 코드에 `runBlocking` | 호출 스레드를 붙잡으니 코루틴으로 얻은 게 사라집니다. 이 함수를 `suspend` 로 올리고 `runBlocking` 은 `main` 과 테스트에만 남기죠 |
+| `Job()` 을 직접 만들어 컨텍스트에 넘김 | 부모 Job 과의 연결이 끊겨 취소 전파와 완료 대기가 모두 사라집니다. 대기가 필요하면 `coroutineScope`, 실패 격리가 목적이면 `supervisorScope` 로 의도를 표현하세요 |
+| 코루틴을 띄운 함수가 자식보다 먼저 반환 | 스코프 밖에서 띄웠다는 뜻입니다. `coroutineScope { }` 로 감싸면 자식이 전부 끝나야 반환하니 작업 누수가 구조적으로 불가능해집니다 |
+| `launch` 로 띄우고 결과를 아무도 보지 않음 | 결과가 필요하면 `async` + `await` 로 바꾸고, 정말 필요 없다면 실패를 어디서 알게 되는지 적어주세요. 지금은 예외가 나도 호출자가 모릅니다 |
+| `suspend` 함수 안의 `Thread.sleep` 이나 블로킹 JDBC | 스레드를 반납하는 것이 코루틴의 전부인데 여기서 스레드를 재웁니다. `Thread.sleep` 은 `delay` 로, 블로킹 호출이면 그 호출이 왜 이 `suspend` 함수 안에 있는지부터 보죠 |
+| 의존 없는 `suspend` 호출을 한 줄씩 순차로 나열 | 서로 기다릴 이유가 없으면 `coroutineScope` 안에서 나란히 띄우세요. 지금은 100+200+300ms 가 그대로 더해집니다 |
+| `ExecutorService` + `Future` 목록으로 팬아웃 | 완료 대기·형제 취소·예외 전파를 손으로 짜는 코드입니다. `coroutineScope` + `launch` 로 바꾸면 그 셋이 기본 동작으로 따라옵니다 |
 
 ## 연습
 

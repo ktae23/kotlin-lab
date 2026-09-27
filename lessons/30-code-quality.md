@@ -27,7 +27,7 @@ JetBrains가 [공식 컨벤션](https://kotlinlang.org/docs/coding-conventions.h
 ### 포맷팅 — 기억할 건 몇 개 안 됩니다
 
 - 들여쓰기 **스페이스 4칸**, 탭 금지
-- 줄 길이 제한은 공식 문서에 없지만 팀에서 **120자**로 정하는 게 일반적 (ktlint 기본값)
+- 줄 길이 제한은 공식 문서에 없고, 팀에서 **120자**로 정하는 게 일반적입니다. 다만 120이 **ktlint 기본값은 아닙니다** — ktlint 1.x 의 `max_line_length` 는 `ktlint_official`(기본 스타일) 이 **140**, `android_studio` 가 100, `intellij_idea` 는 제한 없음이에요. 120으로 맞추려면 `.editorconfig` 에 `max_line_length = 120` 을 직접 적어야 합니다
 - `{` 는 같은 줄 끝에, `}` 는 새 줄에
 - **후행 람다(trailing lambda)**: 마지막 파라미터가 함수 타입이면 괄호 밖으로 뺀다
   ```kotlin
@@ -71,7 +71,7 @@ Gradle 자체는 Lesson 38~41에서 다루지만, 모양만 봐두세요.
 // build.gradle.kts
 plugins {
     id("org.jlleitschuh.gradle.ktlint") version "12.1.1"
-    id("io.gitlab.arturbosch.detekt") version "1.23.6"
+    id("io.gitlab.arturbosch.detekt") version "1.23.8"   // 1.23.x 최신 stable
 }
 
 detekt {
@@ -80,6 +80,7 @@ detekt {
 }
 ```
 
+- **detekt 버전 주의**: 1.23.x 는 Kotlin 2.x 프론트엔드(K2)를 쓰지 않아 최신 문법에서 오탐(false positive)이 납니다. 2.0 은 아직 alpha 이고 그룹 ID 도 `dev.detekt` 로 바뀌었어요. 당분간 1.23.x 를 쓰되, **오탐 몇 건은 `@Suppress` 로 넘기는 게 정상**이라고 팀에 미리 공유해두세요
 - 로컬: `./gradlew ktlintFormat` (고쳐줌) → `./gradlew detekt` (보고만)
 - CI: `./gradlew ktlintCheck detekt` 를 **`test` 앞에** 둡니다. 형식 위반은 테스트 돌리기 전에 떨어뜨리는 게 빠릅니다
 - **게이트로 걸 때 주의**: 레거시 코드에 detekt를 처음 켜면 위반이 수천 건 나옵니다. `detektBaseline` 으로 기존 위반을 **베이스라인에 동결**하고, 새 코드만 막으세요. 이거 모르고 켰다가 롤백하는 팀이 정말 많습니다
@@ -90,7 +91,7 @@ detekt {
 |---|---|---|
 | `LongMethod` | 함수가 기준 줄 수 초과 | 책임이 여러 개라는 신호. 테스트가 어려워짐 |
 | `LongParameterList` | 파라미터 과다 | 인자 순서 실수. 값 객체로 묶으라는 신호 |
-| `ComplexCondition` | `&&`/`||` 가 뒤엉킨 조건 | 읽는 사람마다 해석이 달라짐. 이름 붙인 `val` 로 빼라 |
+| `ComplexCondition` | `&&`/`\|\|` 가 뒤엉킨 조건 | 읽는 사람마다 해석이 달라짐. 이름 붙인 `val` 로 빼라 |
 | `CyclomaticComplexMethod` | 분기 경로 과다 | 테스트 케이스 수가 폭발 |
 | `TooGenericExceptionCaught` | `catch (e: Exception)` | 잡을 생각 없던 예외까지 삼킨다 |
 | `SwallowedException` | catch 블록이 비었거나 원인을 안 넘김 | 장애 원인이 로그에서 사라진다 |
@@ -130,9 +131,11 @@ fun items(): List<Item>          // ✓
 | **분기 완전성** | sealed·enum `when` 에 `else` 가 붙었는가 | "`else` 를 빼면 상태 추가 때 컴파일러가 잡아줍니다" |
 | **컬렉션** | 수동 루프+`var` 누적 / `filter{}.size` / 큰 리스트에 체인 다단 | "`sumOf`·`count`·`groupBy` 로 대체됩니다" |
 | **가시성·불변성** | `public` 이 기본값으로 방치됐는가 / `var` 프로퍼티 / 가변 컬렉션 반환 | "여긴 `internal` 로 좁히고 반환 타입을 `List` 로 바꾸죠" |
+| **캡슐화 깊이** | 백킹 프로퍼티를 `get() = _items` 로 그대로 넘기는가 | "`List` 로 좁힌 건 좋습니다. 다만 그건 **실수 방지**까지고, 런타임 객체는 그대로라 캐스팅으로 뚫리고 내부 변경이 호출자에게 그대로 보입니다. 공개 API 나 동시성 경계면 `get() = _items.toList()` 로 스냅샷을 주세요 — 대신 접근마다 복사 비용입니다" |
 | **예외** | `catch (e: Exception)` / 빈 catch / 원인 예외 미전달 | "잡을 예외를 좁히고, 삼킬 거면 왜 삼키는지 주석을 남겨주세요" |
 | **코루틴** | `runBlocking` 이 프로덕션 코드에 / `GlobalScope` / 디스패처 하드코딩 / `CancellationException` 을 catch | "스코프 주인이 누구죠? 디스패처는 생성자로 주입합시다" (Lesson 31·32·36) |
 | **성능** | N+1 쿼리 / 루프 안 I/O / 불필요한 중간 컬렉션 | "여기 `asSequence()` 로 바꾸거나 쿼리를 한 번에 가져오죠" |
+| **동시성·스레드 안전** | 싱글턴 빈(`@Service`/`@Component`)에 가변 필드가 있는가 / 공유 가변 상태를 락 없이 건드리는가 / `@Transactional` 경계 안에서 외부 호출·긴 작업을 하는가 | "Spring 빈은 기본이 싱글턴이라 이 `var` 는 모든 요청이 공유합니다. 요청 범위 상태는 파라미터나 지역 변수로 내리세요" / "`@Transactional` 안에서 HTTP 를 부르면 커넥션을 잡은 채 대기합니다. 트랜잭션 밖으로 빼죠" |
 | **테스트** | 실패 경로 테스트가 있는가 / 테스트가 구현 세부에 결합됐는가 | "성공 케이스만 있네요. null·빈 목록·예외 경로도 필요합니다" |
 
 체크리스트를 위에서부터 순서대로 보는 게 중요합니다. **null → 분기 → 예외** 가 장애 빈도 순이에요.
@@ -153,7 +156,7 @@ fun items(): List<Item>          // ✓
 | `SwallowedException` | `catch (...) { }` — 본문이 빈 catch |
 | `TooGenericExceptionCaught` | `catch (e: Exception)` 또는 `Throwable` |
 
-출력은 **줄 번호 → 규칙 이름** 순으로 정렬합니다. 규칙별 집계도 **규칙 이름 오름차순**으로요. (정렬이 없으면 출력이 실행마다 달라질 수 있습니다 — 이것도 리뷰 포인트입니다.)
+출력은 **줄 번호 → 규칙 이름** 순으로 정렬합니다. 규칙별 집계도 **규칙 이름 오름차순**으로요. (정렬을 빼도 매 실행 결과가 흔들리진 않습니다 — `flatMapIndexed` 와 `filter` 는 순서를 보존하고 집계도 `LinkedHashMap` 이니까요. 대신 **L9 의 두 규칙 순서가 `rules` 정의 순서에 종속**됩니다. 보고서가 규칙 목록을 건드릴 때마다 흔들리는 건, 결정적이어도 나쁜 설계예요.)
 
 ```kotlin starter
 const val MAX_LINE = 90
@@ -224,7 +227,7 @@ TooGenericExceptionCaught = 1
 
 `val rules = listOf(Rule("ClassNaming", "클래스 이름은 PascalCase 로 쓰세요") { Regex("""^\s*class\s+[a-z]""").___(it) }, ... )`
 
-`Rule("MaxLineLength", "한 줄이 ${'$'}MAX_LINE 자를 넘습니다") { it.___ > MAX_LINE }`
+`Rule("MaxLineLength", "한 줄이 $MAX_LINE 자를 넘습니다") { it.___ > MAX_LINE }`
 
 `fun analyze(src: String) = src.lines().___ { idx, line -> rules.filter { r -> r.check(line) }.map { r -> Violation(idx + 1, r.name, r.message) } }.sortedWith(___({ it.line }, { it.rule }))`
 ```
@@ -275,7 +278,8 @@ val rules: List<Rule> = listOf(
     },
 )
 
-// 정렬이 있어야 출력이 결정적이다 — 보고서는 항상 같은 순서여야 diff 가 의미를 가진다.
+// 정렬을 빼도 결과는 재현되지만, 그때 순서는 rules 정의 순서에 끌려다닌다.
+// 보고서 순서는 규칙 목록과 무관해야 diff 가 의미를 가진다.
 fun analyze(src: String): List<Violation> =
     src.lines()
         .flatMapIndexed { idx, line ->

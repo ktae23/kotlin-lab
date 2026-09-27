@@ -1,6 +1,8 @@
 # Lesson 15 — 중첩·inner 클래스, typealias, value class
 
-세 가지 작은 도구를 묶었습니다. 공통점은 **"Java 에서 하던 습관을 그대로 옮기면 손해 보는 지점"** 이라는 것. 특히 첫 번째는 **Java 와 기본값이 정반대**라 모르면 조용히 메모리 누수가 납니다.
+세 가지 작은 도구를 묶었습니다. 공통점은 **"Java 에서 하던 습관을 그대로 옮기면 손해 보는 지점"** 이라는 것.
+
+특히 첫 번째는 **Java 와 기본값이 정반대**입니다. 다행히 **Kotlin 쪽 기본값이 안전한 쪽**이라, 모르고 옮겨도 조용히 새지 않고 **컴파일 에러로 막힙니다.** 조심할 방향은 반대예요 — Java 에서 왜 누수가 났는지를 알아야, 에러를 만났을 때 `inner` 를 붙이는 게 맞는지 설계를 바꾸는 게 맞는지 판단할 수 있습니다.
 
 ## 중첩 클래스 — 기본값이 Java와 뒤집혀 있다
 
@@ -67,7 +69,17 @@ typealias JpaPage<T> = org.springframework.data.domain.Page<T>
 
 - **긴 제네릭 타입**을 시그니처마다 반복하지 않기
 - **함수 타입**에 의미 있는 이름 주기 (`(String) -> Boolean` 보다 `Validator`)
-- **이름 충돌 해소** — 같은 이름 클래스가 두 패키지에 있을 때 `import x.y.Page as JpaPage` 대신
+- **긴 패키지 경로를 짧은 이름으로** — `typealias JpaPage<T> = org.springframework.data.domain.Page<T>`
+
+세 번째를 "이름 충돌 해소"로 쓰는 코드를 자주 보는데, **충돌 해소만 목적이면 import alias 가 보통 맞습니다.**
+
+```kotlin
+// 같은 목적, 두 가지 방법 — 둘 중 하나를 고른다
+import org.springframework.data.domain.Page as JpaPage            // 이 파일 안에서만 유효
+typealias JpaPage<T> = org.springframework.data.domain.Page<T>    // 모듈 전체에 공개되는 새 이름
+```
+
+`typealias` 는 **최상위 선언**이라 가시성을 따로 막지 않으면 모듈 어디서나 보입니다. 파일 하나에서 이름이 겹친 걸 풀자고 모듈 전역에 별명을 하나 더 공개하는 건 과합니다. **여러 파일에서 반복해서 쓸 별명이면 `typealias`, 이 파일만의 충돌이면 `import ... as`.**
 
 ### 한계: 타입 안전성은 1도 주지 않는다
 
@@ -100,7 +112,23 @@ link(orderId, userId)   // 컴파일 에러 — 타입이 다르다
 
 Java 에서 이러려면 진짜 래퍼 클래스를 만들어야 했고, 그러면 **객체 할당 비용**이 붙었습니다. 그래서 "그냥 long 쓰자" 로 타협했죠.
 
-Kotlin 의 `value class`(1.5 이전 이름: `inline class`)는 **컴파일러가 대부분의 경우 래퍼를 지우고 안쪽 값만 남깁니다.** 위 `link` 는 바이트코드에서 `link(long, long)` 이 됩니다. 안전성은 컴파일 타임에 받고, 런타임 비용은 0 인 거예요.
+Kotlin 의 `value class`(1.5 이전 이름: `inline class`)는 **컴파일러가 대부분의 경우 래퍼를 지우고 안쪽 값만 남깁니다.** 안전성은 컴파일 타임에 받고, 런타임 비용은 0 인 거예요.
+
+### Java 에서는 사실상 못 부른다 — 이름 맹글링
+
+다만 "래퍼가 지워진다"를 "Java 에서 `link(1L, 2L)` 로 부를 수 있다"로 읽으면 틀립니다. 위 `link` 를 컴파일해 `javap` 로 열어 보면 이렇습니다.
+
+```
+public static final void link--rrp3rc(long, long);
+```
+
+파라미터는 실제로 `long` 두 개로 풀렸지만 **함수 이름에 해시가 붙었습니다.** 이걸 **이름 맹글링(name mangling)** 이라고 해요. 시그니처가 `(long, long)` 으로 같아져 버리면 **오버로드가 충돌**하고(`link(UserId, OrderId)` 와 `link(Long, Long)` 이 구분되지 않음), Java 쪽에서 아무 `long` 이나 넣어 타입 안전성을 우회하는 것도 막아야 하니까요.
+
+결론은 명확합니다. **`value class` 를 파라미터로 받는 함수는 Java 에서 호출할 수 없다고 보세요.** 해시는 시그니처에서 계산되므로 코드가 바뀌면 이름도 바뀝니다 — 그 이름에 기대는 코드는 쓸 수 없어요.
+
+- Java 에서 호출해야 하는 **공개 API 경계**에는 `value class` 를 파라미터/반환 타입으로 두지 않습니다
+- 꼭 필요하면 `@JvmName("link")` 으로 이름을 고정하거나, Java 용 오버로드를 따로 만듭니다
+- **Kotlin 내부에서만 도는 도메인 타입**이면 아무 문제 없습니다 — 실제로 대부분이 이쪽입니다
 
 ### 제약
 

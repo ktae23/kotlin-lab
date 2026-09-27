@@ -19,7 +19,16 @@ class OrderController(private val service: OrderService) {
 
 조건은 딱 하나, 클래스패스에 **`kotlinx-coroutines-reactor`** 가 있어야 합니다. Spring이 반환 타입의 `suspend`를 감지하면 `kotlinx.coroutines.reactor.mono { }` 로 감싸서 실행하거든요. 그래서 리액터 브리지가 필요합니다.
 
-> **착각하기 쉬운 지점.** MVC에서 `suspend` 컨트롤러를 쓴다고 **서버 처리량이 늘지 않습니다.** 톰캣 스레드는 여전히 요청 하나를 잡고 있어요(정확히는 서블릿 비동기로 풀렸다가 응답 시점에 다시 잡힘). 얻는 건 **처리량이 아니라 코드 구조** — `async`로 병렬 조회하고 `withTimeout`으로 자르는 게 쉬워지는 것뿐입니다. 진짜 처리량을 원하면 WebFlux로 가거나 가상 스레드를 켜야 합니다.
+> **착각하기 쉬운 지점 — 조건을 붙여서 기억하세요.**
+>
+> 사실관계부터. Spring 은 `suspend` 핸들러를 `Mono` 로 어댑트해 **서블릿 비동기**로 처리합니다. 그래서 **대기하는 동안 톰캣 스레드는 반납됩니다** — "톰캣 스레드가 요청 하나를 계속 붙잡고 있다" 는 건 사실이 아니에요.
+>
+> 그럼 처리량이 오르냐. **하류(downstream)가 무엇이냐에 달렸습니다.**
+>
+> - 하류가 **블로킹 JDBC** 면 — `withContext(Dispatchers.IO)` 로 옮긴 **그 스레드가 대신 묶입니다.** 대기하는 스레드를 톰캣 풀에서 IO 풀로 옮겨 담았을 뿐이라 **처리량은 안 늘어요.** 여기서 얻는 건 **코드 구조**입니다 — `async` 로 병렬 조회하고 `withTimeout` 으로 자르는 게 쉬워지는 것.
+> - 하류가 **`WebClient` 같은 논블로킹** 이면 — 대기하는 스레드가 **아예 없습니다.** 이때는 **MVC 에서도 처리량이 오릅니다.**
+>
+> 그러니 "MVC 에서 suspend 는 처리량과 무관하다" 가 아니라 **"병목이 블로킹 드라이버면 무관하다"** 가 정확한 문장입니다. 블로킹 JDBC 가 병목이면 WebFlux(+R2DBC)로 가거나 가상 스레드를 켜야 하고, 외부 HTTP 호출이 대부분인 API 라면 MVC + `suspend` + `WebClient` 만으로도 이득이 납니다.
 
 ## WebFlux + 코루틴 — 코루틴의 홈그라운드
 
@@ -138,6 +147,22 @@ try {
 > *"대체하지 않습니다. 층이 다릅니다. 가상 스레드는 JVM 런타임이 블로킹 비용을 낮추는 것이고, 코루틴은 언어 수준에서 동시성을 구조적으로 표현하는 것입니다. 단순 블로킹 CRUD API라면 가상 스레드만 켜는 게 코드 변경 없이 처리량을 올리는 최선입니다. 반면 요청 하나가 여러 외부 호출을 합성하고 부분 실패와 취소 전파가 필요하면 코루틴의 구조적 동시성이 유리합니다. 둘을 같이 쓸 수도 있는데, 그때는 커넥션 풀이 실질 상한이라는 점과 `synchronized` 핀닝을 함께 봐야 합니다."*
 
 여기까지 말하면 "실제로 고민해 본 사람"으로 읽힙니다.
+
+## 리뷰할 때 보는 것
+
+코루틴 PR 에서 사고가 나는 자리는 **블로킹이 섞이는 줄**과 **예외를 잡는 줄** 둘입니다.
+
+| 코드에서 보이면 | 이렇게 지적한다 |
+|---|---|
+| `suspend` 함수가 블로킹 호출(JDBC·`RestTemplate`·`Thread.sleep`)을 그대로 한다 | 함수가 **스스로** `withContext(Dispatchers.IO)` 로 감싸라. `suspend` 함수는 어느 디스패처에서 불려도 안전해야 한다(main-safety). WebFlux 면 이벤트 루프 스레드가 멈춘다 |
+| `catch (e: Exception)` 이 코루틴 안에 있다 | `CancellationException` 까지 삼켜 취소가 무시된 좀비 코루틴이 남는다. 앞에 `catch (e: CancellationException) { throw e }` 를 두어라 |
+| `catch (e: IllegalStateException)` / `catch (e: RuntimeException)` | `java.util.concurrent.CancellationException` 의 상위가 `IllegalStateException` 이다. 이것도 취소를 삼킨다. 취소 예외를 먼저 재던져라 |
+| `finally` 안에서 `suspend` 함수를 호출한다 | 취소된 코루틴에서는 즉시 `CancellationException` 이 나 정리가 안 끝난다. `withContext(NonCancellable) { }` 으로 감싸라 |
+| 디스패처가 함수 안에 하드코딩돼 있다 | 생성자 파라미터로 빼고 기본값만 `Dispatchers.IO` 로 둬라. 테스트에서 가상 시간을 쓰려면 주입이 필요하다 |
+| 블로킹 호출에 가상 스레드 디스패처를 물렸다 | 실질 상한은 커넥션 풀이다. 무제한으로 풀면 대기 큐가 힙에 쌓인다. 자체 상한이 없으면 `Dispatchers.IO` 가 여전히 안전한 기본값이다 |
+| `synchronized` 블록 안에서 블로킹한다 | 가상 스레드가 캐리어 스레드에 핀닝돼 unmount 되지 않는다. `ReentrantLock` 으로 바꾸거나 블로킹을 락 밖으로 빼라 |
+| 서로 의존하는 호출을 `async` 로 감쌌다 | `async` 는 **독립적인 것**에만 쓴다. 앞 결과가 없으면 뒤를 할 이유가 없는 호출은 순차로 두어라 |
+| 요청 스코프 밖의 `GlobalScope.launch` | 요청이 취소돼도 살아남아 자원을 쥔다. `coroutineScope` 안의 자식으로 두어 취소가 전파되게 하라 |
 
 ## 연습
 

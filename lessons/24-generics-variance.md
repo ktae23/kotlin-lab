@@ -59,7 +59,9 @@ val sink: Sink<Dog> = animalSink         // 그냥 대입된다
 | `in T` | 파라미터 타입에만 등장 | 안으로 들어옴 (소비자) | `? super T` |
 | (없음) | 둘 다 | 무공변 | `T` |
 
-컴파일러가 강제합니다. `out T`로 선언해놓고 `fun accept(item: T)`를 넣으면 **"T occurs in 'in' position"** 컴파일 에러가 납니다. Java가 런타임까지 미루던 판단을 선언 시점에 끝내는 거예요.
+컴파일러가 강제합니다. `out T`로 선언해놓고 `fun accept(item: T)`를 넣으면 **"T occurs in 'in' position"** 컴파일 에러가 납니다.
+
+오해하지 마세요 — **Java 도 이 검사를 컴파일 타임에 합니다.** 위 `printAll` 의 `animals.add(...)` 가 컴파일 에러인 게 그 증거고요. 차이는 검사 시점이 아니라 **적는 횟수**입니다. Java 는 같은 판단을 **사용 지점마다 반복**해야 하고(`List<? extends Animal>` 을 파라미터마다), Kotlin 은 **선언 한 번으로 끝냅니다.**
 
 ## PECS가 사라지는 지점
 
@@ -88,7 +90,16 @@ fun copy(from: Array<out Any>, to: Array<Any>) {   // Java 의 ? extends 와 동
 }
 ```
 
-`Array<T>`는 무공변(JVM 배열이라 어쩔 수 없음)이라 `out`을 선언에 못 박습니다. 이럴 때만 사용 지점에서 `out`을 씁니다. **먼저 선언 지점으로 풀고, 안 되면 프로젝션.** 순서가 중요합니다.
+`Array<T>`가 무공변인 이유는 면접에서 자주 **거꾸로** 외워 오는 지점입니다. JVM 배열은 무공변이 아니라 **공변**입니다 — `String[]` 을 `Object[]` 에 그냥 대입할 수 있어요. 그리고 그 공변성이 불건전(unsound)해서, 넣는 순간 **런타임에** 터집니다.
+
+```java
+Object[] objs = new String[1];   // 통과한다 — 배열은 공변
+objs[0] = 42;                    // ArrayStoreException — 런타임에야 안다
+```
+
+`ArrayStoreException` 이라는 예외가 JDK 에 존재하는 이유가 이것입니다. **Kotlin 은 그 구멍을 막으려고 `Array<T>` 를 일부러 무공변으로 설계**했고, 안전하게 읽기만 하는 자리에서만 `Array<out T>` 프로젝션을 허용합니다. 위 `copy` 의 `from: Array<out Any>` 가 그 자리예요 — 읽기만 하니까 안전하고, 컴파일러가 `from[i] = ...` 을 막아줍니다.
+
+`out` 을 `Array` 선언에 못 박는 건 그래서고, 이럴 때만 사용 지점에서 씁니다. **먼저 선언 지점으로 풀고, 안 되면 프로젝션.** 순서가 중요합니다.
 
 ## star projection `*` — "타입은 모르지만 뭔가는 있다"
 
@@ -139,6 +150,20 @@ val ints: List<Int> = mixed.pick()      // 호출 지점에서 T = Int 로 확�
 `reified`는 **`inline` 함수에서만** 가능합니다. 인라인이 아니면 복사할 곳이 없으니 타입을 박을 수도 없어요. 실무에서는 `objectMapper.readValue<OrderDto>(json)`, `retrofit.create<ApiService>()` 같은 API가 전부 이 기법입니다.
 
 > 면접 단골: **"`reified`가 타입 소거를 없애나요?"** → 아니오. JVM의 소거는 그대로입니다. 인라인 전개 시점에 구체 타입이 **코드로 박히는 것**뿐입니다. 그래서 `inline` 없이는 못 쓰고, 재귀 제네릭 호출에는 쓸 수 없습니다.
+
+## 리뷰할 때 보는 것
+
+| 코드에서 보이면 | 이렇게 지적한다 |
+|---|---|
+| 타입 파라미터가 반환 타입에만 등장하는데 무공변 | `out T` 로 선언하세요. 호출하는 쪽마다 프로젝션을 적게 만들 이유가 없습니다 |
+| 파라미터 타입에만 등장하는데 무공변 | `in T` 로. 이 인터페이스는 소비자(consumer)라는 걸 선언이 말하게 하세요 |
+| 공개 API 반환 타입이 `MutableList<T>` | 읽기 전용 `List<T>` 로. `List` 는 `out E` 라 호출자가 상위 타입으로 그냥 받습니다 |
+| 함수마다 `Foo<out Bar>` 프로젝션이 반복된다 | 선언 지점(`interface Foo<out T>`)으로 올릴 수 있는지 먼저 보세요. 프로젝션은 무공변 타입일 때의 차선책입니다 |
+| `Class<T>` 파라미터를 타입 확인용으로만 끌고 다닌다 | `inline fun <reified T>` 로 바꾸면 인자가 사라집니다 |
+| `reified` 를 쓰려고 큰 함수 전체에 `inline` 을 붙였다 | 타입이 필요한 부분만 작은 `inline` 함수로 떼세요. 인라인은 호출 지점마다 바이트코드가 복사됩니다 |
+| `as List<Foo>` 캐스팅 + `@Suppress("UNCHECKED_CAST")` | 소거 때문에 검사되지 않는 캐스팅입니다. `filterIsInstance<Foo>()` 나 `reified` 로 풀 수 있는지 확인하세요 |
+| 로깅·디버깅이 아닌 곳에 `Foo<*>` | `*` 는 "타입을 모른다"는 선언입니다. 쓰기가 필요하면 타입 파라미터를 받으세요 |
+| `Array<T>` 를 공변인 줄 알고 상위 타입에 대입 | Kotlin `Array` 는 무공변입니다. 읽기 전용이면 `Array<out T>`, 아니면 `List` 를 쓰세요 |
 
 ## 연습
 

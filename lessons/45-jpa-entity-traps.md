@@ -1,6 +1,6 @@
 # Lesson 45 — Kotlin JPA 엔티티의 함정
 
-Lesson 3에서 "Lombok은 잊으세요, data class가 다 해준다"고 했습니다. 이번 레슨은 그걸 **뒤집습니다.**
+L12 에서 "Lombok은 잊으세요, data class가 다 해준다"고 했습니다. 이번 레슨은 그걸 **뒤집습니다.**
 
 > data class는 **DTO·VO·요청/응답 모델**에서 완벽합니다.
 > JPA **엔티티**에서는 재앙입니다.
@@ -70,7 +70,7 @@ public class Member {
         if (!(o instanceof Member other)) return false;
         return id != null && id.equals(other.id);   // id 기반
     }
-    @Override public int hashCode() { return getClass().hashCode(); }  // 상수
+    @Override public int hashCode() { return Hibernate.getClass(this).hashCode(); }  // 프록시를 벗긴 실제 클래스
 }
 ```
 
@@ -94,11 +94,17 @@ class Member(
         return myId == other.id
     }
 
-    override fun hashCode(): Int = javaClass.hashCode()
+    override fun hashCode(): Int = Hibernate.getClass(this).hashCode()
 }
 ```
 
 `data`가 빠졌고 `equals`/`hashCode`를 손으로 씁니다. 하나씩 뜯어보죠.
+
+### `hashCode`는 **진짜** 상수여야 한다
+
+`javaClass.hashCode()`(Java 로는 `getClass().hashCode()`)를 쓰라는 조언을 자주 보실 텐데, **그건 상수가 아닙니다.** LAZY 프록시는 엔티티를 **상속한 서브클래스**라서 `javaClass` 가 다르고, 해시도 따라서 달라져요. 같은 행인데 `equals` 는 `true`, `hashCode` 는 불일치 — **`equals`/`hashCode` 규약 위반**이고 `HashSet.contains(proxy)` 가 `false` 를 돌려줍니다. 2번 함정(프록시)을 고치려고 쓴 코드가 2번 함정에 다시 걸리는 셈입니다.
+
+답은 둘입니다. **① 프록시를 벗긴 실제 클래스를 쓰거나**(`Hibernate.getClass(this).hashCode()` — `org.hibernate.Hibernate` 가 프록시면 원본 엔티티 클래스를, 아니면 자기 클래스를 돌려줍니다. 위 예제가 이쪽입니다), **② 클래스와도 무관한 진짜 상수를 쓰거나**(`override fun hashCode(): Int = 31`). ②는 해시 분산을 통째로 포기하는 대신 **어떤 경우에도 안 깨지고**, 엔티티가 한 컬렉션에 수만 개씩 들어가는 일은 드물어서 대개 남는 장사입니다. 연습에서 ①·②의 차이를 출력으로 확인합니다.
 
 ### `var` vs `val` — 어디에 뭘 쓰나
 
@@ -111,7 +117,7 @@ Lesson 2에서 "`val`을 기본으로"라고 했지만 엔티티는 예외가 �
 | `@Id` | `var ... = null` | `IDENTITY` 전략은 INSERT 후에 채워짐 |
 | `@OneToMany` 컬렉션 | `val` + `mutableListOf()` | **참조는 고정, 내용만 변경** |
 
-마지막 줄이 중요합니다. Hibernate는 자기가 만든 `PersistentBag`/`PersistentSet`으로 변경을 추적하는데, `member.orders = newList`처럼 **참조를 갈아끼우면 추적이 끊깁니다.** `orphanRemoval` 설정에 따라 엉뚱한 DELETE가 나가기도 해요. **`val` + `mutableListOf()`가 정답**입니다. 참조는 못 바꾸고 `add`/`remove`만 되니 실수가 원천 차단됩니다.
+마지막 줄이 중요합니다. Hibernate는 자기가 만든 `PersistentBag`/`PersistentSet`으로 변경을 추적하는데, `member.orders = newList`처럼 **참조를 갈아끼우면 추적이 끊깁니다.** 그리고 `orphanRemoval = true`(= `cascade="all-delete-orphan"`)면 엉뚱한 DELETE 가 나가는 게 아니라 아예 **예외**가 납니다 — Hibernate 6 는 플러시 시점에 `A collection with cascade="all-delete-orphan" was no longer referenced by the owning entity instance` 를 던져요. **`val` + `mutableListOf()`가 정답**입니다. 참조는 못 바꾸고 `add`/`remove`만 되니 실수가 원천 차단됩니다.
 
 ### id는 `Long? = null` — lateinit은 안 된다
 
@@ -129,14 +135,35 @@ JPA 스펙은 엔티티에 **파라미터 없는 기본 생성자**를 요구합
 ```kotlin
 // build.gradle.kts
 plugins {
-    kotlin("plugin.jpa") version "1.9.25"      // = noArg, @Entity/@Embeddable 대상
-    kotlin("plugin.spring") version "1.9.25"   // = allOpen (Lesson 21에서 다룹니다)
+    kotlin("plugin.jpa") version "2.0.21"      // = noArg, @Entity/@Embeddable/@MappedSuperclass 대상
+    kotlin("plugin.spring") version "2.0.21"   // = allOpen 의 spring 프리셋 (L42 에서 다뤘습니다)
 }
 ```
 
-`plugin.jpa`는 **바이트코드 레벨로만** 기본 생성자를 넣습니다. 우리 코드에선 안 보이니 `Member()`로 잘못 만들 걱정이 없어요. `plugin.allopen`(=`plugin.spring`)도 같이 필요합니다. Kotlin 클래스는 기본이 `final`인데 Hibernate는 LAZY 프록시를 만들려고 엔티티를 **상속**하거든요. `final`이면 프록시를 못 만들고 조용히 EAGER처럼 동작합니다.
+`plugin.jpa`는 **바이트코드 레벨로만** 기본 생성자를 넣습니다. 우리 코드에선 안 보이니 `Member()`로 잘못 만들 걱정이 없어요.
 
-> **면접 빈출** — "Kotlin에서 JPA 엔티티 쓸 때 주의점은?" 답의 뼈대: ① data class 금지(equals/copy) ② `plugin.jpa`로 기본 생성자 ③ `plugin.allopen`으로 final 해제(프록시) ④ 컬렉션은 `val` + `mutableListOf()` ⑤ id는 `Long? = null`.
+### 엔티티를 여는 건 **별개 문제**다 — `plugin.spring` 은 `@Entity` 를 열지 않는다
+
+Kotlin 클래스는 기본이 `final`인데 Hibernate는 LAZY 프록시를 만들려고 엔티티를 **상속**합니다. `final`이면 프록시를 못 만들어 LAZY 가 사실상 EAGER 처럼 동작하죠. 그래서 `plugin.spring` 을 넣고 "열렸겠지" 하고 넘어가는데, **그게 아닙니다.**
+
+allOpen 의 spring 프리셋이 여는 건 `@Component`, `@Async`, `@Transactional`, `@Cacheable`, `@SpringBootTest` 와 **`@Component` 를 메타 애노테이션으로 갖는 것들**(`@Service`·`@Repository`·`@Controller`·`@Configuration`)뿐입니다. **JPA 애노테이션은 목록에 하나도 없어요.** 엔티티를 열려면 직접 해야 합니다.
+
+```kotlin
+// ① allOpen 에 JPA 애노테이션을 직접 등록 — 선언 한 번으로 전 엔티티에 적용 (권장)
+allOpen {
+    annotation("jakarta.persistence.Entity")
+    annotation("jakarta.persistence.MappedSuperclass")
+    annotation("jakarta.persistence.Embeddable")
+}
+
+// ② 또는 엔티티마다 open 을 붙인다
+@Entity
+open class Member(var name: String)
+```
+
+**`plugin.jpa`(noArg)와 `allOpen` 은 서로 다른 일을 합니다.** 전자는 **기본 생성자를 합성**하고, 후자는 **`final` 을 풉니다.** 하나를 켰다고 다른 하나가 따라오지 않아요.
+
+> **면접 빈출** — "Kotlin에서 JPA 엔티티 쓸 때 주의점은?" 답의 뼈대: ① data class 금지(equals/copy) ② `plugin.jpa`로 기본 생성자 ③ **`allOpen` 에 `@Entity` 를 직접 등록**해 `final` 해제(LAZY 프록시) — `plugin.spring` 의 프리셋만으로는 엔티티가 안 열립니다 ④ 컬렉션은 `val` + `mutableListOf()` ⑤ id는 `var ... Long? = null`.
 
 ## toString도 직접, 연관관계는 빼고
 
@@ -152,35 +179,73 @@ data class MemberResponse(val id: Long, val name: String, val email: String) {  
 }
 ```
 
-경계를 이렇게 그으세요. **엔티티는 영속성 계층 안에서만 살고, 밖으로는 data class DTO가 나간다.** 그러면 Lesson 3에서 배운 `copy()`, 구조 분해, 기본값이 전부 제 역할을 합니다.
+경계를 이렇게 그으세요. **엔티티는 영속성 계층 안에서만 살고, 밖으로는 data class DTO가 나간다.** 그러면 L12 에서 배운 `copy()`, 구조 분해, 기본값이 전부 제 역할을 합니다.
+
+## 리뷰할 때 보는 것
+
+엔티티 PR 은 **`class` 선언 줄과 `equals`/`hashCode` 두 함수**만 봐도 절반은 걸러집니다.
+
+| 코드에서 보이면 | 이렇게 지적한다 |
+|---|---|
+| `@Entity` 에 `data` 가 붙어 있다 | 일반 `class` 로 바꾸고 `equals`/`hashCode` 를 id 기반으로 직접 써라. 모든 프로퍼티 기준 동등성은 가변 엔티티·LAZY 프록시와 양립할 수 없다 |
+| `hashCode()` 가 `javaClass.hashCode()` 다 | 프록시는 서브클래스라 값이 갈라져 `equals` 와 규약이 어긋난다. `Hibernate.getClass(this).hashCode()` 나 진짜 상수로 바꿔라 |
+| `hashCode()` 가 `id` 를 쓴다 | id 는 INSERT 시점에 `null` → 값으로 바뀐다. 컬렉션에 먼저 넣은 엔티티를 저장 후 못 찾는다. 해시는 인스턴스 상태와 무관해야 한다 |
+| `equals` 가 `javaClass == other.javaClass` 로 타입을 본다 | `other !is Member` 로 바꿔라. 클래스 일치를 요구하면 LAZY 프록시가 전부 탈락한다 |
+| `@OneToMany` 컬렉션이 `var` 다 | `val` + `mutableListOf()` 로. 참조를 갈아끼우면 Hibernate 의 변경 추적이 끊기고, `orphanRemoval` 이면 플러시에서 예외가 난다 |
+| `@Id` 가 `val id: Long = 0` 에 `id != 0L` 센티넬 | `var id: Long? = null` 로. "아직 저장 안 됨" 은 `0` 이 아니라 `null` 이 표현해야 하고, `IDENTITY` 는 INSERT 후에 채워진다 |
+| `toString()` 에 연관관계 필드가 들어 있다 | 빼라. 양방향이면 무한 재귀로 `StackOverflowError` 가 나고, LAZY 컬렉션이면 로그 한 줄이 쿼리를 부른다 |
+| `plugin.spring` 만 있고 `allOpen` 에 `@Entity` 등록이 없다 | spring 프리셋은 JPA 애노테이션을 열지 않는다. `allOpen { annotation("jakarta.persistence.Entity") }` 를 추가하거나 엔티티를 `open` 으로 선언하라 |
+| 엔티티가 컨트롤러 반환 타입에 있다 | 응답 `data class` 로 변환해 내보내라. 엔티티가 경계를 넘으면 컬럼 추가가 곧 API 스펙 변경이 된다 |
 
 ## 연습
 
 `equals`/`hashCode`가 엔티티에서 어떻게 어긋나는지 직접 출력해서 확인하고, id 기반으로 고치는 문제입니다. (JPA를 쓰지 않고 순수 Kotlin으로 같은 상황을 재현합니다.)
 
-1. `BadMember`는 `data class`로 이미 주어져 있습니다. 건드리지 마세요.
+핵심은 **LAZY 프록시가 엔티티를 상속한 서브클래스**라는 점이에요. 그래서 연습에 `open class` + 상속으로 만든 **가짜 프록시**를 넣어 뒀습니다. 이게 있어야 `hashCode` 의 결함이 출력에 드러납니다.
+
+1. `BadMember`(data class), `ClassHashMember`(`hashCode` 를 `javaClass` 로 만든 경우), 그리고 두 프록시 클래스는 **이미 주어져 있습니다. 건드리지 마세요.**
 2. `GoodMember`의 `equals`/`hashCode`를 **id 기반**으로 구현하세요.
    - 같은 인스턴스면 `true`
    - `GoodMember`가 아니면 `false`
    - **둘 중 하나라도 id가 `null`이면 `false`** (아직 저장 안 된 엔티티는 서로 같을 수 없음)
    - 둘 다 id가 있으면 id끼리 비교
-   - `hashCode()`는 **id를 쓰면 안 됩니다.** id는 저장 시점에 `null` → 값으로 바뀌므로, 해시가 변하면 `HashSet`이 깨집니다. **상수**를 반환하세요.
+   - `hashCode()`는 **id를 쓰면 안 됩니다.** id는 저장 시점에 `null` → 값으로 바뀌므로, 해시가 변하면 `HashSet`이 깨집니다.
+   - **`javaClass.hashCode()` 도 안 됩니다.** 프록시는 서브클래스라 클래스가 다르고, 해시가 갈라집니다. **어떤 인스턴스에서도 같은 값**을 돌려주세요.
 
 ```kotlin starter
-// 잘못된 방식 — 엔티티를 data class 로 만든 경우 (수정하지 마세요)
+// 잘못된 방식 1 — 엔티티를 data class 로 만든 경우 (수정하지 마세요)
 data class BadMember(
     var id: Long? = null,
     var name: String,
 )
 
+// 잘못된 방식 2 — equals 는 id 기반인데 hashCode 를 javaClass 로 만든 경우 (수정하지 마세요)
+open class ClassHashMember(
+    var id: Long? = null,
+    var name: String,
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is ClassHashMember) return false
+        val myId = id ?: return false
+        return myId == other.id
+    }
+
+    override fun hashCode(): Int = javaClass.hashCode()
+}
+
 // 올바른 방식 — id 기반 동등성
-class GoodMember(
+open class GoodMember(
     var id: Long? = null,
     var name: String,
 ) {
     // TODO: equals 를 id 기반으로 구현하세요
-    // TODO: hashCode 를 상수로 구현하세요
+    // TODO: hashCode 를 어떤 인스턴스에서도 같은 값이 나오는 상수로 구현하세요
 }
+
+// Hibernate 의 LAZY 프록시 흉내 — 엔티티를 "상속한" 서브클래스다 (수정하지 마세요)
+class ClassHashMemberProxy(id: Long?, name: String) : ClassHashMember(id, name)
+class GoodMemberProxy(id: Long?, name: String) : GoodMember(id, name)
 
 fun main() {
     // 1) data class 엔티티: 영속 상태에서 필드를 바꾸면 해시가 달라진다
@@ -194,18 +259,27 @@ fun main() {
     println("[bad] copy 된 id: ${badCopy.id}")
     println("[bad] 원본 == 복사본: ${bad == badCopy}")
 
-    // 3) id 기반 엔티티: 필드를 바꿔도 컬렉션에서 찾을 수 있다
+    // 3) hashCode 가 javaClass 면 프록시에서 규약이 깨진다 — equals 는 true 인데 해시가 다르다
+    val ch = ClassHashMember(id = 1L, name = "박경태")
+    val chSet = hashSetOf(ch)
+    val chProxy = ClassHashMemberProxy(1L, "아직 로딩 안 된 값")
+    println("[javaClass] 프록시 ==: ${ch == chProxy}")
+    println("[javaClass] 프록시 해시 일치: ${ch.hashCode() == chProxy.hashCode()}")
+    println("[javaClass] 프록시 contains: ${chSet.contains(chProxy)}")
+
+    // 4) id 기반 엔티티: 필드를 바꿔도 컬렉션에서 찾을 수 있다
     val good = GoodMember(id = 1L, name = "박경태")
     val goodSet = hashSetOf(good)
     good.name = "박경태(수정)"
     println("[good] 필드 변경 후 contains: ${goodSet.contains(good)}")
 
-    // 4) 같은 id 면 다른 인스턴스여도 같은 엔티티 (프록시가 이렇게 들어온다)
-    val proxyLike = GoodMember(id = 1L, name = "아직 로딩 안 된 값")
-    println("[good] 같은 id 다른 인스턴스 ==: ${good == proxyLike}")
-    println("[good] 같은 id 다른 인스턴스 contains: ${goodSet.contains(proxyLike)}")
+    // 5) 같은 id 면 프록시(서브클래스)여도 같은 엔티티다
+    val goodProxy = GoodMemberProxy(1L, "아직 로딩 안 된 값")
+    println("[good] 프록시 ==: ${good == goodProxy}")
+    println("[good] 프록시 해시 일치: ${good.hashCode() == goodProxy.hashCode()}")
+    println("[good] 프록시 contains: ${goodSet.contains(goodProxy)}")
 
-    // 5) 아직 저장 안 된(id == null) 엔티티끼리는 절대 같지 않다
+    // 6) 아직 저장 안 된(id == null) 엔티티끼리는 절대 같지 않다
     val new1 = GoodMember(name = "신규A")
     val new2 = GoodMember(name = "신규B")
     println("[good] 미영속 둘 ==: ${new1 == new2}")
@@ -217,50 +291,74 @@ fun main() {
 [bad] 필드 변경 후 contains: false
 [bad] copy 된 id: 1
 [bad] 원본 == 복사본: true
+[javaClass] 프록시 ==: true
+[javaClass] 프록시 해시 일치: false
+[javaClass] 프록시 contains: false
 [good] 필드 변경 후 contains: true
-[good] 같은 id 다른 인스턴스 ==: true
-[good] 같은 id 다른 인스턴스 contains: true
+[good] 프록시 ==: true
+[good] 프록시 해시 일치: true
+[good] 프록시 contains: true
 [good] 미영속 둘 ==: false
 [good] 미영속 자기 자신 ==: true
 ```
 
 ```text hint
-JPA 엔티티의 동등성 기준은 **식별자 하나**입니다. 이름이 바뀌어도 id 가 1 이면 같은 행이고, LAZY 프록시처럼 필드가 텅 비어 있어도 id 가 1 이면 같은 행이에요. 그런데 `hashCode` 에는 제약이 하나 더 붙습니다 — `id` 는 저장 전 `null` 이었다가 INSERT 후 값으로 **바뀌죠.** `HashSet` 이 객체를 넣을 때의 해시로 버킷을 정한다는 걸 떠올려 보세요. id 로 해시를 만들면 저장 직후 무슨 일이 벌어질까요?
+JPA 엔티티의 동등성 기준은 **식별자 하나**입니다. 이름이 바뀌어도 id 가 1 이면 같은 행이고, LAZY 프록시처럼 필드가 텅 비어 있어도 id 가 1 이면 같은 행이에요. 그런데 `hashCode` 에는 제약이 둘 붙습니다. 하나 — `id` 는 저장 전 `null` 이었다가 INSERT 후 값으로 **바뀝니다.** 둘 — 출력 3번이 보여주듯 **프록시는 서브클래스**라 `javaClass` 가 원본과 다릅니다. `HashSet` 이 넣을 때의 해시로 버킷을 정한다는 걸 떠올리면, 두 경우 모두 무슨 일이 벌어질지 보일 거예요.
 ---
-`equals` 는 관문 네 개입니다 — 동일 인스턴스(`this === other`), 타입 검사(`other !is GoodMember`), 미영속 차단, 그리고 id 비교. 세 번째 관문은 엘비스로 한 줄에 끝납니다: `val myId = id ?: return false`. `hashCode` 는 인스턴스 상태와 무관한 상수여야 하니 `javaClass.hashCode()` 를 쓰세요 (레슨 본문 Java 예제의 `getClass().hashCode()` 와 같은 것입니다).
+`equals` 는 관문 네 개입니다 — 동일 인스턴스(`this === other`), 타입 검사(`other !is GoodMember`), 미영속 차단, 그리고 id 비교. 세 번째 관문은 엘비스로 한 줄에 끝납니다: `val myId = id ?: return false`. `hashCode` 는 **어떤 인스턴스에서도 같은 값**이어야 합니다 — `javaClass.hashCode()` 는 프록시에서 갈라지니 답이 아니고, 실무에서 쓰는 `Hibernate.getClass(this)` 는 여기 없으니, **숫자 리터럴 하나**를 그대로 돌려주세요.
 ---
-순서가 중요합니다. `this === other` 가 **맨 앞**에 와야 `new1 == new1` — id 가 null 인 자기 자신 — 이 `true` 가 돼요. 그다음 타입 검사, 그다음 미영속 차단입니다. `val myId = id ?: return false` 는 **내** id 만 보지만, 상대 id 가 null 인 경우도 `myId == other.id` 에서 자연히 false 가 되니 검사는 한 번으로 충분합니다. `hashCode` 가 상수라는 건 **모든 엔티티가 한 버킷에 들어간다**는 뜻이고, 그래서 저장 후 id 가 채워져도 버킷이 움직이지 않습니다 — 버킷 안에서의 구분은 `equals` 가 맡아요. 해시 분산을 포기하고 **정확성**을 사는, 의도된 거래입니다.
+순서가 중요합니다. `this === other` 가 **맨 앞**에 와야 `new1 == new1` — id 가 null 인 자기 자신 — 이 `true` 가 돼요. 그다음 타입 검사, 그다음 미영속 차단입니다. 타입 검사를 `is` 로 쓰는 것도 의도된 선택이에요 — `javaClass != other.javaClass` 로 썼다면 **프록시가 전부 탈락**합니다. `val myId = id ?: return false` 는 **내** id 만 보지만, 상대 id 가 null 인 경우도 `myId == other.id` 에서 자연히 false 가 되니 검사는 한 번으로 충분합니다. `hashCode` 가 상수라는 건 **모든 엔티티가 한 버킷에 들어간다**는 뜻이고, 그래서 저장 후 id 가 채워져도, 프록시가 들어와도 버킷이 움직이지 않습니다 — 버킷 안에서의 구분은 `equals` 가 맡아요. 해시 분산을 포기하고 **정확성**을 사는, 의도된 거래입니다.
 ---
 뼈대는 이렇습니다. 빈칸 네 개만 채우면 돼요.
 
 `override fun equals(other: Any?): Boolean { if (this === ___) return true; if (other !is ___) return false; val myId = id ?: return ___; return myId == other.___ }`
 
-`override fun hashCode(): Int = ___`
+`override fun hashCode(): Int = ___`  ← 숫자 하나
 ```
 
 ```kotlin solution
-// 잘못된 방식 — 엔티티를 data class 로 만든 경우 (수정하지 마세요)
+// 잘못된 방식 1 — 엔티티를 data class 로 만든 경우 (수정하지 마세요)
 data class BadMember(
     var id: Long? = null,
     var name: String,
 )
 
+// 잘못된 방식 2 — equals 는 id 기반인데 hashCode 를 javaClass 로 만든 경우 (수정하지 마세요)
+open class ClassHashMember(
+    var id: Long? = null,
+    var name: String,
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is ClassHashMember) return false
+        val myId = id ?: return false
+        return myId == other.id
+    }
+
+    override fun hashCode(): Int = javaClass.hashCode()
+}
+
 // 올바른 방식 — id 기반 동등성
-class GoodMember(
+open class GoodMember(
     var id: Long? = null,
     var name: String,
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true          // 같은 인스턴스면 id 가 없어도 같다
-        if (other !is GoodMember) return false
+        if (other !is GoodMember) return false   // is 라서 프록시(서브클래스)도 통과한다
         val myId = id ?: return false            // 미영속(transient) 끼리는 절대 같지 않다
         return myId == other.id                  // 비교 기준은 오직 식별자
     }
 
-    // id 는 저장 시점에 null -> 값으로 바뀐다. 해시가 따라 변하면 HashSet 의 버킷이 어긋나므로
-    // 클래스 단위 상수를 쓴다. (동일 해시 + equals 로 구분 — 컬렉션 규약상 안전)
-    override fun hashCode(): Int = javaClass.hashCode()
+    // id 는 저장 시점에 null -> 값으로 바뀌고, javaClass 는 프록시에서 달라진다.
+    // 둘 다 피하려면 인스턴스와 무관한 진짜 상수여야 한다.
+    // (실무에서는 Hibernate.getClass(this).hashCode() 도 같은 목적의 선택지다)
+    override fun hashCode(): Int = 31
 }
+
+// Hibernate 의 LAZY 프록시 흉내 — 엔티티를 "상속한" 서브클래스다 (수정하지 마세요)
+class ClassHashMemberProxy(id: Long?, name: String) : ClassHashMember(id, name)
+class GoodMemberProxy(id: Long?, name: String) : GoodMember(id, name)
 
 fun main() {
     // 1) data class 엔티티: 영속 상태에서 필드를 바꾸면 해시가 달라진다
@@ -274,18 +372,27 @@ fun main() {
     println("[bad] copy 된 id: ${badCopy.id}")
     println("[bad] 원본 == 복사본: ${bad == badCopy}")
 
-    // 3) id 기반 엔티티: 필드를 바꿔도 컬렉션에서 찾을 수 있다
+    // 3) hashCode 가 javaClass 면 프록시에서 규약이 깨진다 — equals 는 true 인데 해시가 다르다
+    val ch = ClassHashMember(id = 1L, name = "박경태")
+    val chSet = hashSetOf(ch)
+    val chProxy = ClassHashMemberProxy(1L, "아직 로딩 안 된 값")
+    println("[javaClass] 프록시 ==: ${ch == chProxy}")
+    println("[javaClass] 프록시 해시 일치: ${ch.hashCode() == chProxy.hashCode()}")
+    println("[javaClass] 프록시 contains: ${chSet.contains(chProxy)}")
+
+    // 4) id 기반 엔티티: 필드를 바꿔도 컬렉션에서 찾을 수 있다
     val good = GoodMember(id = 1L, name = "박경태")
     val goodSet = hashSetOf(good)
     good.name = "박경태(수정)"
     println("[good] 필드 변경 후 contains: ${goodSet.contains(good)}")
 
-    // 4) 같은 id 면 다른 인스턴스여도 같은 엔티티 (프록시가 이렇게 들어온다)
-    val proxyLike = GoodMember(id = 1L, name = "아직 로딩 안 된 값")
-    println("[good] 같은 id 다른 인스턴스 ==: ${good == proxyLike}")
-    println("[good] 같은 id 다른 인스턴스 contains: ${goodSet.contains(proxyLike)}")
+    // 5) 같은 id 면 프록시(서브클래스)여도 같은 엔티티다
+    val goodProxy = GoodMemberProxy(1L, "아직 로딩 안 된 값")
+    println("[good] 프록시 ==: ${good == goodProxy}")
+    println("[good] 프록시 해시 일치: ${good.hashCode() == goodProxy.hashCode()}")
+    println("[good] 프록시 contains: ${goodSet.contains(goodProxy)}")
 
-    // 5) 아직 저장 안 된(id == null) 엔티티끼리는 절대 같지 않다
+    // 6) 아직 저장 안 된(id == null) 엔티티끼리는 절대 같지 않다
     val new1 = GoodMember(name = "신규A")
     val new2 = GoodMember(name = "신규B")
     println("[good] 미영속 둘 ==: ${new1 == new2}")
