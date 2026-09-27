@@ -144,7 +144,7 @@ plugins {
 
 ### 엔티티를 여는 건 **별개 문제**다 — `plugin.spring` 은 `@Entity` 를 열지 않는다
 
-Kotlin 클래스는 기본이 `final`인데 Hibernate는 LAZY 프록시를 만들려고 엔티티를 **상속**합니다. `final`이면 프록시를 못 만들어 LAZY 가 사실상 EAGER 처럼 동작하죠. 그래서 `plugin.spring` 을 넣고 "열렸겠지" 하고 넘어가는데, **그게 아닙니다.**
+Kotlin 클래스는 기본이 `final`인데 Hibernate는 LAZY 프록시를 만들려고 엔티티를 **상속**합니다. `final`이면 프록시를 못 만들어 `HHH000305: Could not create proxy factory` 경고만 남기고 **`@ManyToOne`·`@OneToOne` 의 LAZY 가 EAGER 처럼 동작**합니다(예외가 아니라 조용한 폴백이라 더 나쁩니다). `@OneToMany` 는 `PersistentCollection` 래퍼라 영향이 없어서, **일부만 새는 게 더 헷갈립니다.** 그래서 `plugin.spring` 을 넣고 "열렸겠지" 하고 넘어가는데, **그게 아닙니다.**
 
 allOpen 의 spring 프리셋이 여는 건 `@Component`, `@Async`, `@Transactional`, `@Cacheable`, `@SpringBootTest` 와 **`@Component` 를 메타 애노테이션으로 갖는 것들**(`@Service`·`@Repository`·`@Controller`·`@Configuration`)뿐입니다. **JPA 애노테이션은 목록에 하나도 없어요.** 엔티티를 열려면 직접 해야 합니다.
 
