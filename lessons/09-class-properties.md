@@ -107,6 +107,39 @@ class Temperature {
 
 `field`는 컴파일러가 만들어 주는 숨은 저장소입니다. **getter/setter 안에서 `field`를 한 번도 안 쓰면 backing field 자체가 생성되지 않습니다** — 위의 `area`가 그래서 메모리를 안 먹는 겁니다.
 
+## backing **property** — 밑줄 관례
+
+`field` 로는 못 푸는 문제가 하나 있습니다. **타입을 바꿔서 내보내는 것**입니다.
+
+```kotlin
+class Cart {
+    val items: List<String> = mutableListOf()   // 공개 타입이 List 라
+    fun add(s: String) { items.add(s) }         // 컴파일 에러 — add 가 없다
+}
+```
+
+`field` 는 프로퍼티와 **타입이 같아야** 하므로 "안에서는 가변, 밖에서는 읽기 전용"을 만들 수 없습니다. 그래서 **프로퍼티를 두 개** 둡니다.
+
+```kotlin
+class Cart {
+    private val _items = mutableListOf<String>()   // 안에서 쓰는 가변 쪽
+    val items: List<String> get() = _items         // 밖에 주는 읽기 전용 뷰
+
+    fun add(s: String) { _items += s }
+}
+```
+
+`cart.items.add(...)` 는 **컴파일 에러**가 됩니다. Android 의 `MutableStateFlow`/`LiveData` 가 이 패턴을 대중화시켰죠.
+
+```kotlin
+private val _uiState = MutableStateFlow(UiState())
+val uiState: StateFlow<UiState> = _uiState.asStateFlow()
+```
+
+**밑줄은 아무 private 프로퍼티에나 붙이는 게 아닙니다.** 공식 컨벤션은 **"공개 대응물이 있는 private 프로퍼티"** 에만 허용합니다. 짝이 없으면 그냥 `cache` 지 `_cache` 가 아니에요. 습관적으로 `_` 를 붙이는 건 Java/C# 버릇입니다.
+
+> **읽기 전용은 불변이 아닙니다.** `items as MutableList` 로 캐스팅하면 뚫립니다. 정말 막아야 하면 `get() = _items.toList()` 로 방어적 복사를 하되, 호출마다 복사 비용을 냅니다. 실무에선 대개 캐스팅까지는 막지 않습니다.
+
 ## `private set` — 밖에선 읽기만, 안에선 쓰기
 
 Java에서 "읽기만 공개"하려면 필드를 `private`으로 두고 getter만 만들었죠. Kotlin은 **접근자마다 가시성을 따로 줍니다.**
@@ -163,6 +196,7 @@ val startedAt = now()       // 런타임에 결정되는 읽기 전용 값
 | `var` 가 그냥 public | `private set` 을 붙여 쓰기 경로를 좁혀라 |
 | `lateinit` 이 여러 개 | 생성자로 못 받는 이유가 뭔가? |
 | `by lazy` 인데 값이 변한다 | lazy 는 한 번만 계산된다. getter로 바꿔라 |
+| `MutableList` 를 그대로 공개한다 | `private val _items` + `val items: List<T> get() = _items` |
 | 부 생성자 여러 개 | 기본 인자로 대체되는지 먼저 확인 |
 
 ## 연습
@@ -176,6 +210,13 @@ val startedAt = now()       // 런타임에 결정되는 읽기 전용 값
 5. `display` 는 **저장하지 말고** 커스텀 getter 로 `"kim: 10000원"` 형태를 만든다
 6. `summary` 는 `by lazy` 로 만들고, 계산될 때 `[summary 계산]` 을 출력한다 — 두 번째 접근에서는 다시 출력되지 않아야 한다
 
+> **6번은 일부러 잘못 설계한 것입니다.** `summary` 는 변하는 `balance` 에서 파생된 값인데 `by lazy` 로 캐시하죠.
+> 기대 출력 마지막 두 줄을 보세요 — `display` 는 `13000원` 인데 `summary` 는 `12000원` 에 박제돼 있습니다.
+> **같은 객체가 두 값을 말하는 상태**입니다. 실무에서 이런 코드는 "왜 화면 금액이 안 바뀌죠" 로 돌아옵니다.
+>
+> 5번(`display`, 커스텀 getter)과 나란히 두고 **같은 데이터에 도구를 다르게 골랐을 때 무슨 일이 생기는지** 직접 보세요.
+> `summary` 를 제대로 고치려면 `by lazy` 를 빼고 `get() = ...` 로 바꾸면 됩니다.
+
 ```kotlin starter
 const val CURRENCY = "원"
 
@@ -186,6 +227,7 @@ class Account(/* TODO: 주 생성자 — owner 는 프로퍼티, initial 은 프
     // TODO: display — 저장하지 않는 커스텀 getter. "kim: 10000원"
 
     // TODO: summary — by lazy. 계산 시 "[summary 계산]" 출력 후 "kim 님의 계좌(잔액 12000원)"
+    //       (의도된 함정: balance 가 바뀌어도 이 값은 안 바뀐다. 연습 설명의 경고 참고)
 
     // TODO: init 블록 — initial 음수 거부
 
@@ -249,7 +291,7 @@ kim 님의 계좌(잔액 12000원)
 ---
 쓰는 도구 네 가지: 접근자 가시성 `private set`, 저장하지 않는 `get() = ...`, 첫 접근 때 한 번만 도는 `by lazy { }`, 그리고 `init { require(조건) { "메시지" } }`. 부 생성자는 `constructor(...) : this(...)` 로 주 생성자에 위임합니다.
 ---
-구조는 이렇습니다. `balance` 는 `var ... = 0L` 로 선언하고 바로 다음 줄에 `private set` 만 씁니다(값 대입은 `init` 에서). `display` 는 `val display: String get() = ...` — 등호(`=`)로 값을 주는 게 아니라 **다음 줄에 `get()`** 을 쓴다는 게 함정입니다. 등호로 주면 그 순간 계산돼서 저장돼 버려 `deposit` 후에도 안 바뀝니다. `by lazy` 블록은 **마지막 줄이 반환값**이라 `println` 을 먼저 쓰고 문자열을 뒤에 둡니다. 마지막 출력에서 `summary` 가 12000 그대로인 건 버그가 아니라 lazy 의 본질입니다.
+구조는 이렇습니다. `balance` 는 `var ... = 0L` 로 선언하고 바로 다음 줄에 `private set` 만 씁니다(값 대입은 `init` 에서). `display` 는 `val display: String get() = ...` — 등호(`=`)로 값을 주는 게 아니라 **다음 줄에 `get()`** 을 쓴다는 게 함정입니다. 등호로 주면 그 순간 계산돼서 저장돼 버려 `deposit` 후에도 안 바뀝니다. `by lazy` 블록은 **마지막 줄이 반환값**이라 `println` 을 먼저 쓰고 문자열을 뒤에 둡니다. 마지막 출력에서 `summary` 가 12000 그대로인 건 lazy 의 본질입니다 — **동작은 맞고 설계가 틀린 것**입니다. 변하는 값에는 `by lazy` 가 아니라 `get()` 을 씁니다.
 ---
 뼈대입니다. 빈칸만 채우세요.
 
