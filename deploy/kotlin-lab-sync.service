@@ -5,9 +5,14 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+# systemd 는 기본이 root 인데 /srv/kotlin-lab 은 ubuntu 소유라
+# git 이 "dubious ownership" 으로 거부한다. 소유자로 실행한다 —
+# root 로 git 을 돌릴 이유도 없다.
+User=ubuntu
+Group=ubuntu
 ExecStart=/srv/kotlin-lab/deploy/sync.sh
 # 정적 파일만 다루므로 권한을 최소로
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
-ReadWritePaths=/srv/kotlin-lab
+ReadWritePaths=/srv/kotlin-lab /srv/study
