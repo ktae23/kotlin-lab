@@ -161,7 +161,7 @@ public final class Money {
 
 ## 컴파일러 플러그인 — 소스가 아니라 IR을 고친다
 
-Spring 셋업 레슨에서 쓰는 `allOpen`/`noArg`가 바로 이 IR 단계에 끼어드는 물건입니다. `@MyEntity class Account(...)` 하나를 두고, **소스는 한 글자도 안 고친 채** 플러그인만 켜고 껐을 때:
+Lesson 45(Spring 셋업)에서 쓰는 `allOpen`/`noArg`가 바로 이 IR 단계에 끼어드는 물건입니다. `@MyEntity class Account(...)` 하나를 두고, **소스는 한 글자도 안 고친 채** 플러그인만 켜고 껐을 때:
 
 ```
 // 플러그인 없이                    // allOpen 적용
