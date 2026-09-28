@@ -1,4 +1,4 @@
-# Lesson 45 — Kotlin JPA 엔티티의 함정
+# Lesson 48 — Kotlin JPA 엔티티의 함정
 
 L12 에서 "Lombok은 잊으세요, data class가 다 해준다"고 했습니다. 이번 레슨은 그걸 **뒤집습니다.**
 
@@ -136,7 +136,7 @@ JPA 스펙은 엔티티에 **파라미터 없는 기본 생성자**를 요구합
 // build.gradle.kts
 plugins {
     kotlin("plugin.jpa") version "2.0.21"      // = noArg, @Entity/@Embeddable/@MappedSuperclass 대상
-    kotlin("plugin.spring") version "2.0.21"   // = allOpen 의 spring 프리셋 (L42 에서 다뤘습니다)
+    kotlin("plugin.spring") version "2.0.21"   // = allOpen 의 spring 프리셋 (L45 에서 다뤘습니다)
 }
 ```
 

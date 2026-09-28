@@ -128,7 +128,7 @@ println(x)          // kotlin.Unit — 진짜로 값이 하나 나온다
 
 ## REPL과 스크립트
 
-문법을 확인하고 싶을 땐 터미널에서 `kotlinc` 만 치면 REPL이 뜹니다. 파일 하나로 스크립트를 쓰고 싶으면 확장자를 `.kts` 로 하면 되고요 — `fun main()` 없이 최상위에 바로 문장을 씁니다. Gradle의 `build.gradle.kts` 가 바로 그 스크립트입니다 (Lesson 38).
+문법을 확인하고 싶을 땐 터미널에서 `kotlinc` 만 치면 REPL이 뜹니다. 파일 하나로 스크립트를 쓰고 싶으면 확장자를 `.kts` 로 하면 되고요 — `fun main()` 없이 최상위에 바로 문장을 씁니다. Gradle의 `build.gradle.kts` 가 바로 그 스크립트입니다 (Lesson 39).
 
 ## 리뷰 관점
 

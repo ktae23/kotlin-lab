@@ -33,7 +33,8 @@ for (const f of files) {
 
   // 학습 서버 클래스패스에 없는 라이브러리 import 금지
   if (starter) {
-    const banned = starter[1].match(/^\s*import\s+(?!kotlin[x]?\.)([\w.]+)/gm);
+    // java.* 는 JDK 표준이라 항상 클래스패스에 있다 (kotlinc 로 컴파일 확인됨)
+    const banned = starter[1].match(/^\s*import\s+(?!(?:kotlin[x]?|java|javax)\.)([\w.]+)/gm);
     if (banned) errs.push(`허용되지 않은 import: ${banned.map((s) => s.trim()).join(", ")}`);
   }
 
@@ -46,7 +47,7 @@ for (const f of files) {
   if (hintBlock && hintCount < 2) errs.push(`힌트 단계 ${hintCount}개 (--- 로 2단계 이상 나눠야 함)`);
   if (solBlock && !/fun\s+main\s*\(/.test(solBlock[1])) errs.push("정답에 `fun main()` 없음");
   if (solBlock) {
-    const banned = solBlock[1].match(/^\s*import\s+(?!kotlin[x]?\.)([\w.]+)/gm);
+    const banned = solBlock[1].match(/^\s*import\s+(?!(?:kotlin[x]?|java|javax)\.)([\w.]+)/gm);
     if (banned) errs.push(`정답에 허용되지 않은 import: ${banned.map((s) => s.trim()).join(", ")}`);
   }
   if (hintCount) withHint++;

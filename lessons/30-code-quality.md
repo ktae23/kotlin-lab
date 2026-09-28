@@ -65,7 +65,7 @@ fun report(o: Order): String {                        // ✓ 본문이 여러 �
 
 ### Gradle 연동 개요
 
-Gradle 자체는 Lesson 38~41에서 다루지만, 모양만 봐두세요.
+Gradle 자체는 Lesson 39~41에서 다루지만, 모양만 봐두세요.
 
 ```kotlin
 // build.gradle.kts

@@ -3,7 +3,7 @@
 > 연습을 통과하면 학습 서버가 이 표를 자동으로 갱신한다. 손으로 고쳐도 된다.
 
 시작일: `2026-09-21`
-목표 완주일: `2026-11-30` (10주 후)
+목표 완주일: `2026-12-07` (11주)
 
 페이스: **하루 2~3시간 × 주 5일 = 하루 1레슨 + 주간 미션 진척**
 
@@ -50,19 +50,22 @@
 | [ ] | 35 | Flow 연산자와 배압 | 코루틴 | W7 |  |  |  |
 | [ ] | 36 | 코루틴 예외 처리 | 코루틴 | W8 |  |  |  |
 | [ ] | 37 | 코루틴 테스트 — runTest 와 가상 시간 | 코루틴 | W8 |  |  |  |
-| [ ] | 38 | build.gradle.kts 기초 | Gradle Kotlin DSL | W8 |  |  |  |
-| [ ] | 39 | 의존성 관리 — 버전 카탈로그, api vs implementation | Gradle Kotlin DSL | W8 |  |  |  |
-| [ ] | 40 | 멀티모듈과 convention plugin, kapt vs KSP | Gradle Kotlin DSL | W8 |  |  |  |
-| [ ] | 41 | 빌드 최적화 — 증분·캐시 | Gradle Kotlin DSL | W9 |  |  |  |
-| [ ] | 42 | Spring Boot + Kotlin 셋업 | 실전 Spring | W9 |  |  |  |
-| [ ] | 43 | 생성자 주입과 설정 바인딩 | 실전 Spring | W9 |  |  |  |
-| [ ] | 44 | 웹 계층 | 실전 Spring | W9 |  |  |  |
-| [ ] | 45 | Kotlin JPA 엔티티의 함정 | 실전 Spring | W9 |  |  |  |
-| [ ] | 46 | 타입 세이프 쿼리 | 실전 Spring | W10 |  |  |  |
-| [ ] | 47 | 트랜잭션과 N+1 | 실전 Spring | W10 |  |  |  |
-| [ ] | 48 | Kotlin 테스트 — Kotest 와 MockK | 실전 Spring | W10 |  |  |  |
-| [ ] | 49 | Spring 코루틴과 가상 스레드 | 실전 Spring | W10 |  |  |  |
-| [ ] | 50 | 실전 미니 API (졸업 과제) | 실전 Spring | W10 |  |  |  |
+| [ ] | 38 | 컴파일러가 하는 일 — K2, IR, 그리고 바이트코드 | 컴파일러와 빌드 | W8 |  |  |  |
+| [ ] | 39 | build.gradle.kts 기초 | 컴파일러와 빌드 | W8 |  |  |  |
+| [ ] | 40 | Gradle 동작 원리 — DSL 과 생명주기 | 컴파일러와 빌드 | W8 |  |  |  |
+| [ ] | 41 | 의존성 관리 — 버전 카탈로그, api vs implementation | 컴파일러와 빌드 | W9 |  |  |  |
+| [ ] | 42 | 멀티모듈과 convention plugin, kapt vs KSP | 컴파일러와 빌드 | W9 |  |  |  |
+| [ ] | 43 | 빌드 최적화 — 증분·캐시 | 컴파일러와 빌드 | W9 |  |  |  |
+| [ ] | 44 | Java 상호운용 — 두 언어가 한 프로젝트에서 | Java 상호운용 | W9 |  |  |  |
+| [ ] | 45 | Spring Boot + Kotlin 셋업 | 실전 Spring | W9 |  |  |  |
+| [ ] | 46 | 생성자 주입과 설정 바인딩 | 실전 Spring | W10 |  |  |  |
+| [ ] | 47 | 웹 계층 | 실전 Spring | W10 |  |  |  |
+| [ ] | 48 | Kotlin JPA 엔티티의 함정 | 실전 Spring | W10 |  |  |  |
+| [ ] | 49 | 타입 세이프 쿼리 | 실전 Spring | W10 |  |  |  |
+| [ ] | 50 | 트랜잭션과 N+1 | 실전 Spring | W10 |  |  |  |
+| [ ] | 51 | Kotlin 테스트 — Kotest 와 MockK | 실전 Spring | W11 |  |  |  |
+| [ ] | 52 | Spring 코루틴과 가상 스레드 | 실전 Spring | W11 |  |  |  |
+| [ ] | 53 | 실전 미니 API (졸업 과제) | 실전 Spring | W11 |  |  |  |
 
 ---
 
@@ -77,9 +80,10 @@
 | [ ] | W5 | L21~L25 | Java Stream 체인을 Kotlin 컬렉션 API로 재작성하고 `asSequence()` 성능 비교 |  |  |
 | [ ] | W6 | L26~L30 | 예외 기반 코드 하나를 `Result`/sealed 결과 타입으로 전환 + detekt 실행 |  |  |
 | [ ] | W7 | L31~L35 | 순차 API 호출 3개를 코루틴 병렬로 전환하고 응답 시간 측정 |  |  |
-| [ ] | W8 | L36~L40 | 대량 배치 처리를 Flow로 재작성 + `build.gradle.kts` 직접 작성 |  |  |
-| [ ] | W9 | L41~L45 | 버전 카탈로그(libs.versions.toml) 도입 + Spring Boot Kotlin 부트스트랩 |  |  |
-| [ ] | W10 | L46~L50 | 미니 API 완성 + 리뷰 체크리스트로 자가 코드 리뷰 + 이력서 3문장 |  |  |
+| [ ] | W8 | L36~L40 | 대량 배치 처리를 Flow로 재작성 + 내 코드를 디컴파일해 컴파일러 산출물 확인 |  |  |
+| [ ] | W9 | L41~L45 | `build.gradle.kts` 직접 작성 + 구성 단계에서 무거운 일을 하는 곳 찾기 |  |  |
+| [ ] | W10 | L46~L50 | 버전 카탈로그 도입 + Java 에서 쓸 Kotlin API 에 interop 애노테이션 점검 |  |  |
+| [ ] | W11 | L51~L53 | 미니 API 완성 + 리뷰 체크리스트로 자가 코드 리뷰 + 이력서 3문장 |  |  |
 
 ---
 

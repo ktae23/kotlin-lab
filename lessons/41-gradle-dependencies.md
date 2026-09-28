@@ -1,4 +1,4 @@
-# Lesson 39 — 의존성 관리 — 버전 카탈로그, api vs implementation
+# Lesson 41 — 의존성 관리 — 버전 카탈로그, api vs implementation
 
 `dependencies { }` 에 한 줄 추가하는 건 5초면 됩니다. 그 한 줄이 빌드 시간과 모듈 경계에 무슨 짓을 하는지 아는 데는 이 레슨 하나가 필요해요.
 

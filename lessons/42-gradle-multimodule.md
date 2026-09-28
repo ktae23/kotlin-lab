@@ -1,4 +1,4 @@
-# Lesson 40 — 멀티모듈과 convention plugin, kapt vs KSP
+# Lesson 42 — 멀티모듈과 convention plugin, kapt vs KSP
 
 모듈을 쪼개는 순간 두 가지 문제가 새로 생깁니다. **빌드 설정이 모듈마다 중복되는 문제**와, **모듈 사이의 의존 방향이 꼬이는 문제**. 이 레슨은 그 둘과 빌드를 느리게 만드는 주범 하나를 다룹니다.
 

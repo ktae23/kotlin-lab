@@ -103,9 +103,9 @@ class Product(
 
 `private set` 이 아니라 **`protected set`** 인 이유가 있습니다. Hibernate 는 LAZY 로딩을 위해 엔티티를 **상속한 프록시 클래스**를 런타임에 만듭니다. `private` 으로 잠그면 그 하위 타입에서 접근할 길이 막히고, 실무에서는 테스트가 id 를 심을 수도 없어서 결국 리플렉션이 동원됩니다. **바깥에서는 못 바꾸고 하위 타입에는 열어 두는** `protected set` 이 엔티티 id 의 표준형입니다.
 
-그리고 위 세 함정 중 **동등성은 이 레슨에서 끝나지 않습니다.** `data` 를 떼면 `equals`/`hashCode` 는 기본 동작(**참조 비교**)으로 돌아가는데, 그건 "같은 행(row)인데 다른 객체" 문제를 해결해 주지 않아요. 엔티티의 동등성은 **id 기준으로 직접 구현**해야 하고, `hashCode` 를 상수로 두는 이유까지 **L45 — Kotlin JPA 엔티티의 함정** 에서 손으로 씁니다. 여기서는 "`data` 를 떼는 것까지가 절반이다" 만 챙기세요.
+그리고 위 세 함정 중 **동등성은 이 레슨에서 끝나지 않습니다.** `data` 를 떼면 `equals`/`hashCode` 는 기본 동작(**참조 비교**)으로 돌아가는데, 그건 "같은 행(row)인데 다른 객체" 문제를 해결해 주지 않아요. 엔티티의 동등성은 **id 기준으로 직접 구현**해야 하고, `hashCode` 를 상수로 두는 이유까지 **L48 — Kotlin JPA 엔티티의 함정** 에서 손으로 씁니다. 여기서는 "`data` 를 떼는 것까지가 절반이다" 만 챙기세요.
 
-> **L45 와의 관계.** L45 도입부가 "Lesson 3에서 Lombok은 잊으세요" 라고 부르는 레슨이 실은 **이 레슨(L12)** 입니다. 거기서 이 결론을 **엔티티 한정으로 뒤집고**, 세 함정의 목록도 조금 다릅니다 — L45 는 `equals`/`hashCode` · **LAZY 프록시** · `copy()` 를 셋으로 꼽습니다. 위의 `toString()` 무한 재귀까지 합치면 실제로 조심할 건 넷입니다.
+> **L48 와의 관계.** L48 도입부가 "Lesson 3에서 Lombok은 잊으세요" 라고 부르는 레슨이 실은 **이 레슨(L12)** 입니다. 거기서 이 결론을 **엔티티 한정으로 뒤집고**, 세 함정의 목록도 조금 다릅니다 — L48 는 `equals`/`hashCode` · **LAZY 프록시** · `copy()` 를 셋으로 꼽습니다. 위의 `toString()` 무한 재귀까지 합치면 실제로 조심할 건 넷입니다.
 
 **data class는 DTO / VO / 요청·응답 모델에 쓰세요.** 거기서는 완벽합니다.
 
@@ -147,7 +147,7 @@ Kotlin 2.4 기준으로는 경고지만 **언어 버전 2.5부터 에러**입니
 | `data class` 인데 프로퍼티가 `var` 이고, 그 객체가 `HashSet`/`HashMap` 키로 들어간다 | 넣은 뒤 필드를 바꾸면 `hashCode` 가 달라져 `contains` 가 `false` 가 된다. 키로 쓸 타입은 `val` 로 고정하라 |
 | `data class` 의 프로퍼티가 `Array` | 생성된 `equals`/`hashCode` 는 배열을 **참조 비교**한다. `List` 로 바꾸거나 `equals`/`hashCode` 를 직접 구현하라 |
 | 중요한 상태를 클래스 **본문**에 선언 | `equals`·`hashCode`·`toString`·`copy`·구조 분해는 **주 생성자 프로퍼티만** 본다. 비교 대상이면 주 생성자로 올려라 |
-| `@Entity` 에 `data class` | `equals`/`toString`/`copy` 셋이 동시에 문제다. 일반 `class` + id 기반 `equals` 로 (L45) |
+| `@Entity` 에 `data class` | `equals`/`toString`/`copy` 셋이 동시에 문제다. 일반 `class` + id 기반 `equals` 로 (L48) |
 | `data class` + `private constructor` | 생성된 `copy()` 가 생성자를 우회한다. `@ConsistentCopyVisibility` 를 붙이거나 `data` 를 떼라 |
 | 필드 5개 이상인데 호출부가 위치 인자 | named argument 를 쓰게 하라. `copy()` 도 마찬가지 — `copy(true)` 는 6개월 뒤 아무도 못 읽는다 |
 | DTO 인데 `data` 가 없음 | `equals`/`toString` 이 없으면 테스트 단정과 로그가 전부 불편해진다. `data` 를 붙여라 |

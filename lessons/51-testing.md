@@ -1,4 +1,4 @@
-# Lesson 48 — Kotlin 테스트: Kotest 와 MockK
+# Lesson 51 — Kotlin 테스트: Kotest 와 MockK
 
 Java/Spring 5년 하셨으면 JUnit5 + AssertJ + Mockito 조합은 손에 붙어 있을 겁니다. Kotlin에서 **그대로 써도 됩니다.** 실제로 많은 팀이 그렇게 써요. 그런데 Mockito는 Kotlin에서 **구조적으로 불편합니다.** 취향 문제가 아니라, 왜 그런지부터 봅시다.
 

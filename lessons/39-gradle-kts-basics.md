@@ -1,4 +1,4 @@
-# Lesson 38 — build.gradle.kts 기초
+# Lesson 39 — build.gradle.kts 기초
 
 빌드 스크립트는 "설정 파일"이 아닙니다. **실행되는 프로그램**이에요. Groovy DSL로 쓰면 그 프로그램이 동적 타입 언어로 쓰인 것이고, Kotlin DSL로 쓰면 정적 타입 언어로 쓰인 겁니다. 이 차이 하나에서 나머지가 전부 따라 나옵니다.
 
@@ -82,7 +82,7 @@ plugins {
 }
 ```
 
-`io.spring.dependency-management` 는 Spring Initializr 가 지금도 기본으로 넣어 주는 플러그인입니다. 다만 그게 하던 일은 Gradle 네이티브 `platform(...)` 이 대체했으니, 둘 중 무엇을 쓸지는 다음 레슨(Lesson 39)에서 정합니다.
+`io.spring.dependency-management` 는 Spring Initializr 가 지금도 기본으로 넣어 주는 플러그인입니다. 다만 그게 하던 일은 Gradle 네이티브 `platform(...)` 이 대체했으니, 둘 중 무엇을 쓸지는 다음 레슨(Lesson 41)에서 정합니다.
 
 차이는 **Gradle이 언제 플러그인의 존재를 아느냐**입니다. `plugins { }` 블록은 다른 코드보다 먼저, 별도로 평가됩니다. 덕분에 Gradle은 스크립트 본문을 컴파일하기 **전에** 플러그인이 제공하는 확장(`kotlin { }`, `springBoot { }` 같은 블록)의 타입을 알 수 있어요. 그래서 자동완성과 타입 검사가 동작합니다.
 

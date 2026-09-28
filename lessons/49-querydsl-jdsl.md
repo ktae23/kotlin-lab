@@ -1,6 +1,6 @@
-# Lesson 46 — 타입 세이프 쿼리
+# Lesson 49 — 타입 세이프 쿼리
 
-L45 에서 엔티티를 제대로 잡았으니 이제 조회입니다. Spring Data JPA의 메서드 이름 쿼리(`findByNameAndStatus`)는 조건 두세 개까지는 편하지만, 실무의 검색 화면은 그렇게 안 생겼죠. **조건 6개 중 사용자가 채운 것만 적용**해야 합니다. 여기서부터가 진짜입니다.
+L48 에서 엔티티를 제대로 잡았으니 이제 조회입니다. Spring Data JPA의 메서드 이름 쿼리(`findByNameAndStatus`)는 조건 두세 개까지는 편하지만, 실무의 검색 화면은 그렇게 안 생겼죠. **조건 6개 중 사용자가 채운 것만 적용**해야 합니다. 여기서부터가 진짜입니다.
 
 ## JPQL 문자열의 문제 — 런타임까지 모른다
 
@@ -119,7 +119,7 @@ val query = jpql {
 
 ## 프로젝션 — data class로 받기
 
-목록 API에서 엔티티를 통째로 가져오는 건 낭비입니다. 필요한 컬럼만 DTO로 받으세요. L45 에서 말한 **"엔티티는 안, DTO는 밖"** 경계가 여기서 실현됩니다.
+목록 API에서 엔티티를 통째로 가져오는 건 낭비입니다. 필요한 컬럼만 DTO로 받으세요. L48 에서 말한 **"엔티티는 안, DTO는 밖"** 경계가 여기서 실현됩니다.
 
 ```java
 // Java + QueryDSL — @QueryProjection
@@ -140,7 +140,7 @@ data class MemberSummary @QueryProjection constructor(
 
 Kotlin에서 생성자에 애노테이션을 붙이려면 `constructor` 키워드를 **명시**해야 합니다. 빼먹으면 "왜 Q클래스가 안 생기지?" 하면서 한참 헤매요. `@QueryProjection`은 DTO가 QueryDSL에 의존하게 만드니, 싫으면 `Projections.constructor(...)`를 씁니다(타입 안정성은 일부 포기). Kotlin JDSL은 `selectNew<MemberSummary>(path(Member::id), ...)` 로 그냥 됩니다.
 
-> **실무 경고.** 프로젝션을 `data class`로 받는 건 좋은데, **엔티티를 그대로 컨트롤러까지 내보내지 마세요.** LAZY 연관이 직렬화 시점에 초기화되면서 N+1이 터지거나(L47), OSIV가 꺼져 있으면 `LazyInitializationException`이 500 에러로 나갑니다. 게다가 엔티티에 컬럼 하나 추가하면 **API 응답 스펙이 소리 없이 바뀝니다.** 클라이언트가 깨지고 나서야 압니다.
+> **실무 경고.** 프로젝션을 `data class`로 받는 건 좋은데, **엔티티를 그대로 컨트롤러까지 내보내지 마세요.** LAZY 연관이 직렬화 시점에 초기화되면서 N+1이 터지거나(L50), OSIV가 꺼져 있으면 `LazyInitializationException`이 500 에러로 나갑니다. 게다가 엔티티에 컬럼 하나 추가하면 **API 응답 스펙이 소리 없이 바뀝니다.** 클라이언트가 깨지고 나서야 압니다.
 
 ## 무엇을 쓰든 원칙은 하나
 

@@ -1,4 +1,4 @@
-# Lesson 49 — Spring 에서의 코루틴과 가상 스레드
+# Lesson 52 — Spring 에서의 코루틴과 가상 스레드
 
 JDK 21이 나오면서 질문이 하나 늘었습니다. **"가상 스레드(virtual threads)가 있는데 코루틴을 왜 쓰죠?"**
 

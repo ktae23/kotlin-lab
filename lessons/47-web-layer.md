@@ -1,4 +1,4 @@
-# Lesson 44 — 웹 계층: 컨트롤러, 검증, 예외 처리
+# Lesson 47 — 웹 계층: 컨트롤러, 검증, 예외 처리
 
 컨트롤러는 Kotlin으로 오면 눈에 띄게 짧아집니다. 그런데 이 레슨의 진짜 목적은 짧아지는 게 아니라 **`@field:` 한 글자를 빠뜨려서 검증이 통째로 무시되는 사고**를 막는 겁니다. 이건 테스트를 안 짜면 배포까지 그대로 나갑니다.
 
@@ -20,7 +20,7 @@ class UserController(
 }
 ```
 
-생성자 주입(L43)이 그대로 오고, 핸들러는 **식 본문 한 줄**이 됩니다. `ResponseEntity`는 헤더나 상태 코드를 직접 만져야 할 때만 쓰세요. 대부분은 반환 타입을 DTO로 두는 쪽이 읽기 좋습니다.
+생성자 주입(L46)이 그대로 오고, 핸들러는 **식 본문 한 줄**이 됩니다. `ResponseEntity`는 헤더나 상태 코드를 직접 만져야 할 때만 쓰세요. 대부분은 반환 타입을 DTO로 두는 쪽이 읽기 좋습니다.
 
 ## 요청/응답 DTO 는 반드시 분리한다
 
@@ -36,7 +36,7 @@ data class UserResponse(val id: Long, val nickname: String)
 - **지연 로딩 폭발.** 엔티티에 `@OneToMany` 가 있으면 Jackson이 직렬화하다 컬렉션을 건드려 N+1을 부르거나 `LazyInitializationException`을 냅니다.
 - **API 계약이 DB 스키마에 묶입니다.** 컬럼명 하나 바꿨는데 모바일 앱이 깨져요.
 
-그리고 L42 에서 말한 규칙이 여기서 완성됩니다. **엔티티는 일반 `class`, DTO는 `data class`.** DTO는 불변에 `copy()`, `equals()`가 공짜로 오니 테스트에서 `assertEquals(expected, actual)` 한 줄로 끝납니다.
+그리고 L45 에서 말한 규칙이 여기서 완성됩니다. **엔티티는 일반 `class`, DTO는 `data class`.** DTO는 불변에 `copy()`, `equals()`가 공짜로 오니 테스트에서 `assertEquals(expected, actual)` 한 줄로 끝납니다.
 
 ## @field: — 이거 모르면 검증이 조용히 무시된다
 

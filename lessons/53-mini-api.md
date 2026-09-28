@@ -1,4 +1,4 @@
-# Lesson 50 — 실전 미니 API 설계 (졸업 과제)
+# Lesson 53 — 실전 미니 API 설계 (졸업 과제)
 
 50개 레슨을 왔습니다. 이제 흩어져 있던 것들을 **하나의 서비스**로 묶습니다. 만들 것은 **사용자 요약 API** — 사용자 정보 + 최근 주문 + 포인트를 한 번에 내려주는 엔드포인트 하나. 작지만 실무 백엔드의 축소판입니다. 외부 호출 합성, 부분 실패, DTO 매핑, 계층 분리가 전부 들어있어요.
 
@@ -68,7 +68,7 @@ class UserEntity(var name: String, var gradeCode: Int) {
         val myId = id ?: return false            // 미영속끼리는 같지 않다
         return myId == other.id
     }
-    override fun hashCode(): Int = 31            // 프록시는 서브클래스 — javaClass 는 갈라진다 (L45)
+    override fun hashCode(): Int = 31            // 프록시는 서브클래스 — javaClass 는 갈라진다 (L48)
 }
 
 // ✅ DTO 는 data class — 불변, equals/toString 공짜
@@ -78,7 +78,7 @@ data class UserSummaryResponse(
 )
 ```
 
-`id` 가 `var ... Long? = null` 인 것도 우연이 아닙니다. `IDENTITY` 전략은 INSERT 후에 id 가 채워지므로 **"아직 저장 안 됨"** 을 표현할 값이 필요한데, 그건 `0` 이 아니라 `null` 이어야 해요. `0` 을 센티넬로 쓰면 `id != 0L` 같은 검사가 코드 곳곳에 번지고, 진짜 id 가 0 인 행이 생기는 날 조용히 깨집니다. **L45 에서 못 박은 형태 그대로 씁니다.**
+`id` 가 `var ... Long? = null` 인 것도 우연이 아닙니다. `IDENTITY` 전략은 INSERT 후에 id 가 채워지므로 **"아직 저장 안 됨"** 을 표현할 값이 필요한데, 그건 `0` 이 아니라 `null` 이어야 해요. `0` 을 센티넬로 쓰면 `id != 0L` 같은 검사가 코드 곳곳에 번지고, 진짜 id 가 0 인 행이 생기는 날 조용히 깨집니다. **L48 에서 못 박은 형태 그대로 씁니다.**
 
 > **규칙으로 외우세요: 엔티티는 `class`, DTO는 `data class`.** 엔티티는 가변·식별자 기반·영속성 컨텍스트 소속이고, DTO는 불변·값 기반·경계를 넘나드는 것 — 성격이 정반대입니다.
 
@@ -121,7 +121,7 @@ fun UserEntity.toSummary(orders: List<OrderEntity>, point: Int) = UserSummaryRes
 
 Java에서 MapStruct를 쓰던 자리입니다. 애노테이션 프로세서도, 생성 코드를 뒤질 일도 없어요. **엔티티 클래스에 매핑 코드가 안 들어가서** 의존 방향이 깔끔하고, 복잡한 변환을 `@Mapping(expression = "java(...)")` 같은 문자열이 아니라 **그냥 Kotlin으로** 씁니다. `firstOrNull()?.title ?: "없음"` 한 줄에 L08 과 L22 가 같이 들어있고요.
 
-## 병렬 조회: 코루틴으로 (L33·L49)
+## 병렬 조회: 코루틴으로 (L33·L52)
 
 ```kotlin
 @Service
@@ -148,7 +148,7 @@ class UserSummaryService(
 
 **첫째, 사용자 조회는 병렬이 아닙니다.** 사용자가 없으면 나머지는 할 필요가 없으니까요. *"독립적인 것만 병렬"* — 무작정 다 `async`로 감싸는 게 아닙니다. **둘째, `try`가 `coroutineScope` 바깥에 있습니다.** 이게 중요해요. `async` 자식이 실패하면 **형제가 취소되고 예외는 `coroutineScope` 경계에서 다시 던져집니다.** `await()` 주위에서만 잡으면 스코프가 또 던져요. 구조적 동시성은 "자식의 실패는 부모의 실패"라는 규칙이고, 그래서 **경계 바깥에서 잡아야** 합니다.
 
-**셋째, `CancellationException` 을 맨 앞에서 다시 던집니다.** 이 레슨에서 가장 안 보이는 함정이에요. JVM 에서 `kotlinx.coroutines.CancellationException` 은 결국 `java.util.concurrent.CancellationException` 이고, **그 상위 클래스가 `java.lang.IllegalStateException`** 입니다(`CancellationException::class.java.superclass` 를 찍어 보면 `class java.lang.IllegalStateException` 이 나옵니다). 즉 `catch (e: IllegalStateException)` 은 **취소까지 같이 잡습니다.** `catch (e: Exception)` 이었다면 리뷰에서 바로 걸렸을 텐데 `IllegalStateException` 은 충분히 좁아 보여서 아무도 안 봐요. 잡히는 순간 **취소된 요청이 `Failure` 를 반환하며 정상 흐름인 척** 이어지고, L49 에서 금지한 **좀비 코루틴**이 그렇게 태어납니다. 규칙은 단순합니다 — **코루틴 안에서 예외를 잡을 땐 `CancellationException` 을 먼저 재던진다.** 잡는 타입이 `Exception` 이든 `IllegalStateException` 이든 똑같이 적용됩니다.
+**셋째, `CancellationException` 을 맨 앞에서 다시 던집니다.** 이 레슨에서 가장 안 보이는 함정이에요. JVM 에서 `kotlinx.coroutines.CancellationException` 은 결국 `java.util.concurrent.CancellationException` 이고, **그 상위 클래스가 `java.lang.IllegalStateException`** 입니다(`CancellationException::class.java.superclass` 를 찍어 보면 `class java.lang.IllegalStateException` 이 나옵니다). 즉 `catch (e: IllegalStateException)` 은 **취소까지 같이 잡습니다.** `catch (e: Exception)` 이었다면 리뷰에서 바로 걸렸을 텐데 `IllegalStateException` 은 충분히 좁아 보여서 아무도 안 봐요. 잡히는 순간 **취소된 요청이 `Failure` 를 반환하며 정상 흐름인 척** 이어지고, L52 에서 금지한 **좀비 코루틴**이 그렇게 태어납니다. 규칙은 단순합니다 — **코루틴 안에서 예외를 잡을 땐 `CancellationException` 을 먼저 재던진다.** 잡는 타입이 `Exception` 이든 `IllegalStateException` 이든 똑같이 적용됩니다.
 
 ## 각 계층에서 Kotlin이 주는 것
 
@@ -179,7 +179,7 @@ class UserSummaryService(
 **그리고 이 셋은 거의 확실히 물어봅니다.** 미리 답을 만들어 두세요.
 
 1. **"엔티티를 `data class`로 안 한 이유가 뭔가요?"** → 위의 `equals`/`toString`/`copy` 세 가지. 여기서 막히면 "블로그 보고 따라 썼구나"가 들통납니다.
-2. **"가상 스레드를 쓰면 코루틴이 필요 없지 않나요?"** → L49 의 답변. 층이 다르다는 것부터.
+2. **"가상 스레드를 쓰면 코루틴이 필요 없지 않나요?"** → L52 의 답변. 층이 다르다는 것부터.
 3. **"`async` 하나가 실패하면 어떻게 되나요?"** → 형제 취소 + 부모로 전파 + `coroutineScope` 바깥에서 잡아야 함. 실제로 짜 본 사람만 아는 지점이라 변별력이 큽니다.
 
 마지막 조언 둘. **GitHub에 올릴 거면 README에 "왜"를 쓰세요.** 코드는 어차피 다 비슷해 보입니다. *"엔티티와 DTO를 왜 분리했는가"*, *"어디는 병렬이고 어디는 아닌가"* 를 적어두면 그 README 자체가 포트폴리오입니다. 그리고 **작게 유지하세요.** 기능 20개짜리 미완성보다, 엔드포인트 3개인데 테스트가 있고 설계 근거가 적힌 게 훨씬 강합니다.
@@ -208,7 +208,7 @@ class UserSummaryService(
 1. **`ApiResult`** — `sealed interface`. `Ok<T>(value)`, `NotFound(what)`, `Failure(reason)`. 실패 타입은 `ApiResult<Nothing>` 을 구현합니다. (L14)
 2. **`Int.toGrade()`** — `2 → "GOLD"`, `1 → "SILVER"`, 나머지 `"BRONZE"`. (L18)
 3. **`UserEntity.toSummary()`** — 엔티티 + 주문 목록 + 포인트를 `UserSummary` DTO로. `recentOrder` 는 첫 주문의 `title`, 없으면 `"없음"`. (L08·L18·L22)
-4. **`summarize()`** — 사용자를 먼저 조회해 없으면 `NotFound`. 있으면 주문·포인트를 `async` 둘로 **병렬** 조회. **`CancellationException` 은 먼저 다시 던지고**, `IllegalStateException` 은 `Failure` 로. **`try` 는 `coroutineScope` 바깥**에 두세요. (L33·L49)
+4. **`summarize()`** — 사용자를 먼저 조회해 없으면 `NotFound`. 있으면 주문·포인트를 `async` 둘로 **병렬** 조회. **`CancellationException` 은 먼저 다시 던지고**, `IllegalStateException` 은 `Failure` 로. **`try` 는 `coroutineScope` 바깥**에 두세요. (L33·L52)
 5. **`render()`** — `when` 으로 `[200]`/`[404]`/`[500]` 형식 문자열. **`else` 금지.** (L14)
 
 `PointRepository` 는 `userId == 3L` 일 때 일부러 터집니다. 세 경로를 모두 지나가는 게 목적입니다.

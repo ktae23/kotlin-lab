@@ -1,4 +1,4 @@
-# Lesson 42 — Spring Boot + Kotlin 셋업
+# Lesson 45 — Spring Boot + Kotlin 셋업
 
 Spring 5년 하셨으면 `build.gradle`은 눈 감고도 씁니다. 그런데 Kotlin으로 넘어오면 **플러그인 3개를 몰라서 하루를 날리는** 일이 실제로 벌어집니다. 그것도 컴파일 에러가 아니라 **런타임에 조용히 이상하게 도는** 형태로요.
 

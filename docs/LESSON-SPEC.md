@@ -93,7 +93,7 @@ fun main() {
 **kotlin-stdlib 와 kotlinx-coroutines 1.10.2 밖에 없다.**
 
 `starter` 와 `solution` 블록에서:
-- ✅ `kotlin.*`, `kotlinx.coroutines.*`, `java.*` (정규화된 이름으로 쓰면 import 없이 가능)
+- ✅ `kotlin.*`, `kotlinx.coroutines.*`, **`java.*` / `javax.*`** — JDK 표준이라 항상 클래스패스에 있다. `import` 해도 되고 정규화된 이름으로 써도 된다
 - ❌ `org.springframework`, `jakarta.*`, `com.querydsl`, Kotest, MockK, JUnit, Gradle API
 
 Spring·JPA·Gradle 을 다루는 레슨은 **이론 본문에서는 실제 코드를 마음껏 보여주되**,
